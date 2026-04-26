@@ -12,6 +12,10 @@
 //   BASE_RPC_URL             same, for mainnet.
 // Optional:
 //   GAO_OWNER_ADDRESS        Final owner (multisig). Defaults to deployer.
+//   GAO_TREASURY_ADDRESS     Wallet that receives `withdrawTreasury` sweeps
+//                            (settled USDC). Defaults to the initial owner;
+//                            override when the controller and revenue sink
+//                            are different wallets. Required non-zero.
 //   GAO_USDC_ADDRESS         If set, the deploy script calls
 //                            setAllowedToken(USDC, true) in a follow-up
 //                            tx so the contract is immediately depositable.
@@ -39,17 +43,20 @@ async function main(): Promise<void> {
 
   const initialOwner =
     (process.env.GAO_OWNER_ADDRESS ?? "").trim() || (await deployer.getAddress());
+  const initialTreasury =
+    (process.env.GAO_TREASURY_ADDRESS ?? "").trim() || initialOwner;
   const usdcAddress = (process.env.GAO_USDC_ADDRESS ?? "").trim();
 
   console.log("─".repeat(70));
-  console.log(`Network:        ${network.name} (chainId ${network.config.chainId})`);
-  console.log(`Deployer:       ${await deployer.getAddress()}`);
-  console.log(`Initial owner:  ${initialOwner}`);
-  console.log(`Allowlist USDC: ${usdcAddress || "(skipped — set GAO_USDC_ADDRESS to enable)"}`);
+  console.log(`Network:         ${network.name} (chainId ${network.config.chainId})`);
+  console.log(`Deployer:        ${await deployer.getAddress()}`);
+  console.log(`Initial owner:   ${initialOwner}`);
+  console.log(`Initial treasury:${initialTreasury}`);
+  console.log(`Allowlist USDC:  ${usdcAddress || "(skipped — set GAO_USDC_ADDRESS to enable)"}`);
   console.log("─".repeat(70));
 
   const factory = await ethers.getContractFactory("GaoDomainDeposit");
-  const escrow = await factory.deploy(initialOwner);
+  const escrow = await factory.deploy(initialOwner, initialTreasury);
   const tx = escrow.deploymentTransaction();
   if (tx) {
     console.log(`Deploy tx:      ${tx.hash}`);

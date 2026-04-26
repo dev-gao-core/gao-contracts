@@ -13,9 +13,11 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 ///         verifies the resulting `Deposited` event off-chain and
 ///         settles ownership via its existing `confirmPurchase` path.
 ///         The contract holds funds until an admin/multisig calls
-///         `settle()` (release to platform treasury — out of scope for
-///         this minimal contract; settlement here just locks state) or
-///         `refund()` (return funds to the original payer).
+///         `settle()` (marks revenue, makes funds withdrawable to
+///         `treasury` via `withdrawTreasury`) or `refund()` (returns
+///         funds to the original payer). Per-token `lockedLiability`
+///         accounting prevents pending/refundable deposits from being
+///         swept while still in DEPOSITED state.
 /// @dev    Wire shape MUST match `gao-id-worker/src/contracts/escrow.abi.ts`.
 ///         Specifically:
 ///           - `deposit(buyer, invoiceId, domainHash, token, amount)`
@@ -61,6 +63,27 @@ contract GaoDomainDeposit is Ownable, Pausable, ReentrancyGuard {
     /// @notice Allowlist of ERC-20s accepted as deposit tokens. Owner-managed.
     mapping(address => bool) public allowedTokens;
 
+    /// @notice Per-token sum of amounts currently in DEPOSITED state.
+    ///         These funds belong to payers (refundable) and MUST NOT be
+    ///         swept to treasury. Incremented on `deposit`, decremented on
+    ///         `settle` (funds move to `withdrawableBalance`) and on
+    ///         `refund` (funds go back to payer).
+    mapping(address => uint256) public lockedLiability;
+
+    /// @notice Per-token sum of settled funds available for treasury sweep.
+    ///         Strictly tracked: only `settle()` increases it, only
+    ///         `withdrawTreasury()` decreases it. Stray transfers into
+    ///         the contract do NOT count — they remain stuck (no rescue
+    ///         path) so the contract is a closed ledger over settled
+    ///         revenue.
+    mapping(address => uint256) public withdrawableBalance;
+
+    /// @notice Recipient of treasury sweeps. Settable by owner; required
+    ///         non-zero. Kept distinct from `owner()` so the controller
+    ///         (multisig signing settle/refund) can be separate from the
+    ///         wallet that ultimately receives platform revenue.
+    address public treasury;
+
     // ── Events ──────────────────────────────────────────────────────────────
 
     /// @notice Emitted on a successful `deposit()`. The off-chain worker
@@ -78,6 +101,8 @@ contract GaoDomainDeposit is Ownable, Pausable, ReentrancyGuard {
     event Settled(bytes32 indexed invoiceId);
     event Refunded(bytes32 indexed invoiceId, address indexed payer, uint256 amount);
     event AllowedTokenSet(address indexed token, bool allowed);
+    event TreasurySet(address indexed previousTreasury, address indexed newTreasury);
+    event TreasuryWithdrawn(address indexed token, address indexed to, uint256 amount);
 
     // ── Custom errors ───────────────────────────────────────────────────────
 
@@ -88,12 +113,22 @@ contract GaoDomainDeposit is Ownable, Pausable, ReentrancyGuard {
     error TokenNotAllowed();
     error InvoiceAlreadyExists();
     error InvoiceNotInDepositedState();
+    error InvalidTreasury();
+    error InsufficientWithdrawable();
 
     // ── Constructor ─────────────────────────────────────────────────────────
 
-    /// @param initialOwner Receives `Ownable` rights. In production this
-    ///                     SHOULD be a multisig (Safe), not an EOA.
-    constructor(address initialOwner) Ownable(initialOwner) {}
+    /// @param initialOwner    Receives `Ownable` rights. In production this
+    ///                        SHOULD be a multisig (Safe), not an EOA.
+    /// @param initialTreasury Wallet that receives `withdrawTreasury` sweeps.
+    ///                        Must be non-zero. Distinct from `initialOwner`
+    ///                        so the controller can be separated from the
+    ///                        revenue-receiving wallet.
+    constructor(address initialOwner, address initialTreasury) Ownable(initialOwner) {
+        if (initialTreasury == address(0)) revert InvalidTreasury();
+        treasury = initialTreasury;
+        emit TreasurySet(address(0), initialTreasury);
+    }
 
     // ── Deposit (public wallet entry point) ─────────────────────────────────
 
@@ -132,6 +167,8 @@ contract GaoDomainDeposit is Ownable, Pausable, ReentrancyGuard {
             commitmentLeaf: leaf,
             payer:          msg.sender
         });
+        // Reserve the deposited amount as refundable. Cleared on settle/refund.
+        lockedLiability[token] += amount;
 
         // Pull tokens AFTER state write so a malicious ERC-20's
         // re-entrant transferFrom cannot observe Status.NONE and re-enter
@@ -191,17 +228,20 @@ contract GaoDomainDeposit is Ownable, Pausable, ReentrancyGuard {
         emit AllowedTokenSet(token, allowed);
     }
 
-    /// @notice Mark a deposit SETTLED. Funds remain in the contract — the
-    ///         actual treasury sweep is intentionally out of scope here so
-    ///         this contract's state is auditable by the off-chain worker
-    ///         without requiring a treasury policy decision on-chain.
-    /// @dev    A future revision may add a `sweep(token, to)` admin
-    ///         function; that change is non-breaking for the worker
-    ///         (it only consumes the Deposited event for verification).
+    /// @notice Mark a deposit SETTLED. Funds remain in the contract; they
+    ///         move from `lockedLiability` to `withdrawableBalance` and
+    ///         can then be swept to `treasury` via `withdrawTreasury`.
     function settle(bytes32 invoiceId) external onlyOwner {
         Deposit storage d = _deposits[invoiceId];
         if (d.status != Status.DEPOSITED) revert InvoiceNotInDepositedState();
         d.status = Status.SETTLED;
+        // Move the amount from refundable to sweepable. Both branches
+        // share the same total balance held by the contract — only the
+        // bucket changes.
+        address tok = d.paymentToken;
+        uint256 amt = d.amount;
+        lockedLiability[tok]      -= amt;
+        withdrawableBalance[tok]  += amt;
         emit Settled(invoiceId);
     }
 
@@ -216,8 +256,40 @@ contract GaoDomainDeposit is Ownable, Pausable, ReentrancyGuard {
         address payer = d.payer;
         uint256 amount = d.amount;
         IERC20 token = IERC20(d.paymentToken);
+        // Release the reservation. Tokens leave the contract; the
+        // liability bucket shrinks by exactly the same amount.
+        lockedLiability[address(token)] -= amount;
         emit Refunded(invoiceId, payer, amount);
         token.safeTransfer(payer, amount);
+    }
+
+    /// @notice Update the treasury sink. Owner-only; non-zero required.
+    function setTreasury(address newTreasury) external onlyOwner {
+        if (newTreasury == address(0)) revert InvalidTreasury();
+        address prev = treasury;
+        treasury = newTreasury;
+        emit TreasurySet(prev, newTreasury);
+    }
+
+    /// @notice Sweep settled funds to `treasury`. Strictly bounded by
+    ///         `withdrawableBalance[token]` — pending (DEPOSITED) and
+    ///         refunded amounts are unreachable. Stray transfers into
+    ///         the contract are not withdrawable through this path
+    ///         (no rescue function by design).
+    function withdrawTreasury(address token, uint256 amount)
+        external
+        onlyOwner
+        nonReentrant
+    {
+        if (token == address(0))                        revert TokenNotAllowed();
+        if (amount == 0)                                revert InvalidAmount();
+        address to = treasury;
+        if (to == address(0))                           revert InvalidTreasury();
+        if (amount > withdrawableBalance[token])        revert InsufficientWithdrawable();
+        // Effects before interaction (CEI + nonReentrant).
+        withdrawableBalance[token] -= amount;
+        emit TreasuryWithdrawn(token, to, amount);
+        IERC20(token).safeTransfer(to, amount);
     }
 
     /// @notice Pause new deposits. Settlement + refund remain available so

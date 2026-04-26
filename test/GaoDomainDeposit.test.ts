@@ -18,7 +18,7 @@ const ZERO_BYTES32 =
 
 describe("GaoDomainDeposit", () => {
   async function deployFresh() {
-    const [owner, payer, buyer, other] = await ethers.getSigners();
+    const [owner, payer, buyer, other, treasury] = await ethers.getSigners();
 
     // Deploy the mock ERC-20 by inlining the source via solc options.
     // Hardhat doesn't support inline contracts directly; we emit a
@@ -31,7 +31,10 @@ describe("GaoDomainDeposit", () => {
     await token.waitForDeployment();
 
     const Escrow = await ethers.getContractFactory("GaoDomainDeposit");
-    const escrow = await Escrow.deploy(await owner.getAddress());
+    const escrow = await Escrow.deploy(
+      await owner.getAddress(),
+      await treasury.getAddress(),
+    );
     await escrow.waitForDeployment();
 
     // Allowlist the mock token.
@@ -45,10 +48,12 @@ describe("GaoDomainDeposit", () => {
       payer,
       buyer,
       other,
+      treasury,
       token,
       escrow,
       tokenAddr: await token.getAddress(),
       escrowAddr: await escrow.getAddress(),
+      treasuryAddr: await treasury.getAddress(),
     };
   }
 
@@ -306,6 +311,252 @@ describe("GaoDomainDeposit", () => {
       .to.be.revertedWithCustomError(escrow, "OwnableUnauthorizedAccount");
     await expect(escrow.connect(other).unpause())
       .to.be.revertedWithCustomError(escrow, "OwnableUnauthorizedAccount");
+  });
+
+  // ── Treasury sweep ───────────────────────────────────────────────────────
+
+  it("constructor rejects treasury = address(0)", async () => {
+    const [owner] = await ethers.getSigners();
+    const Escrow = await ethers.getContractFactory("GaoDomainDeposit");
+    await expect(Escrow.deploy(await owner.getAddress(), ZERO_ADDR))
+      .to.be.revertedWithCustomError(Escrow, "InvalidTreasury");
+  });
+
+  it("constructor sets treasury and emits TreasurySet", async () => {
+    const [owner, , , , treasury] = await ethers.getSigners();
+    const Escrow = await ethers.getContractFactory("GaoDomainDeposit");
+    const escrow = await Escrow.deploy(
+      await owner.getAddress(),
+      await treasury.getAddress(),
+    );
+    const receipt = await escrow.deploymentTransaction()!.wait();
+    expect(await escrow.treasury()).to.equal(await treasury.getAddress());
+    // TreasurySet(address(0), treasury) emitted in constructor.
+    const log = receipt!.logs.find(
+      (l: any) =>
+        (l as any).fragment?.name === "TreasurySet" ||
+        l.topics[0] === escrow.interface.getEvent("TreasurySet")!.topicHash,
+    );
+    expect(log).to.not.equal(undefined);
+  });
+
+  it("deposit increments lockedLiability; settle moves it to withdrawableBalance", async () => {
+    const { owner, payer, buyer, token, escrow, tokenAddr, escrowAddr } =
+      await deployFresh();
+    const { invoiceId, domainHash } = ids();
+    const amount = 199_000_000n;
+    await (await token.connect(payer).approve(escrowAddr, amount)).wait();
+    await escrow
+      .connect(payer)
+      .deposit(await buyer.getAddress(), invoiceId, domainHash, tokenAddr, amount);
+
+    expect(await escrow.lockedLiability(tokenAddr)).to.equal(amount);
+    expect(await escrow.withdrawableBalance(tokenAddr)).to.equal(0n);
+    // Sum of buckets equals on-chain token balance.
+    expect(await token.balanceOf(escrowAddr)).to.equal(amount);
+
+    await escrow.connect(owner).settle(invoiceId);
+    expect(await escrow.lockedLiability(tokenAddr)).to.equal(0n);
+    expect(await escrow.withdrawableBalance(tokenAddr)).to.equal(amount);
+    // Settlement does not move tokens; only relabels the bucket.
+    expect(await token.balanceOf(escrowAddr)).to.equal(amount);
+  });
+
+  it("refund decrements lockedLiability and returns funds to payer", async () => {
+    const { owner, payer, buyer, token, escrow, tokenAddr, escrowAddr } =
+      await deployFresh();
+    const { invoiceId, domainHash } = ids();
+    const amount = 199_000_000n;
+    const payerBefore = await token.balanceOf(await payer.getAddress());
+    await (await token.connect(payer).approve(escrowAddr, amount)).wait();
+    await escrow
+      .connect(payer)
+      .deposit(await buyer.getAddress(), invoiceId, domainHash, tokenAddr, amount);
+
+    expect(await escrow.lockedLiability(tokenAddr)).to.equal(amount);
+
+    await escrow.connect(owner).refund(invoiceId);
+    expect(await escrow.lockedLiability(tokenAddr)).to.equal(0n);
+    expect(await escrow.withdrawableBalance(tokenAddr)).to.equal(0n);
+    expect(await token.balanceOf(escrowAddr)).to.equal(0n);
+    expect(await token.balanceOf(await payer.getAddress())).to.equal(payerBefore);
+  });
+
+  it("owner can withdraw settled USDC to treasury", async () => {
+    const { owner, payer, buyer, token, escrow, tokenAddr, escrowAddr, treasuryAddr } =
+      await deployFresh();
+    const { invoiceId, domainHash } = ids();
+    const amount = 199_000_000n;
+    await (await token.connect(payer).approve(escrowAddr, amount)).wait();
+    await escrow
+      .connect(payer)
+      .deposit(await buyer.getAddress(), invoiceId, domainHash, tokenAddr, amount);
+    await escrow.connect(owner).settle(invoiceId);
+
+    const treasuryBefore = await token.balanceOf(treasuryAddr);
+
+    await expect(escrow.connect(owner).withdrawTreasury(tokenAddr, amount))
+      .to.emit(escrow, "TreasuryWithdrawn")
+      .withArgs(tokenAddr, treasuryAddr, amount);
+
+    expect(await token.balanceOf(treasuryAddr)).to.equal(treasuryBefore + amount);
+    expect(await token.balanceOf(escrowAddr)).to.equal(0n);
+  });
+
+  it("non-owner cannot withdrawTreasury", async () => {
+    const { other, escrow, tokenAddr } = await deployFresh();
+    await expect(escrow.connect(other).withdrawTreasury(tokenAddr, 1n))
+      .to.be.revertedWithCustomError(escrow, "OwnableUnauthorizedAccount");
+  });
+
+  it("withdrawTreasury cannot exceed withdrawable balance", async () => {
+    const { owner, payer, buyer, token, escrow, tokenAddr, escrowAddr } =
+      await deployFresh();
+    const { invoiceId, domainHash } = ids();
+    const amount = 199_000_000n;
+    await (await token.connect(payer).approve(escrowAddr, amount)).wait();
+    await escrow
+      .connect(payer)
+      .deposit(await buyer.getAddress(), invoiceId, domainHash, tokenAddr, amount);
+    await escrow.connect(owner).settle(invoiceId);
+
+    await expect(escrow.connect(owner).withdrawTreasury(tokenAddr, amount + 1n))
+      .to.be.revertedWithCustomError(escrow, "InsufficientWithdrawable");
+  });
+
+  it("withdrawTreasury cannot drain pending (DEPOSITED) funds", async () => {
+    const { owner, payer, buyer, token, escrow, tokenAddr, escrowAddr } =
+      await deployFresh();
+    const { invoiceId, domainHash } = ids();
+    const amount = 199_000_000n;
+    await (await token.connect(payer).approve(escrowAddr, amount)).wait();
+    await escrow
+      .connect(payer)
+      .deposit(await buyer.getAddress(), invoiceId, domainHash, tokenAddr, amount);
+
+    // Contract holds `amount`, but it's all locked liability — withdrawable is 0.
+    expect(await escrow.withdrawableBalance(tokenAddr)).to.equal(0n);
+    await expect(escrow.connect(owner).withdrawTreasury(tokenAddr, 1n))
+      .to.be.revertedWithCustomError(escrow, "InsufficientWithdrawable");
+  });
+
+  it("withdrawTreasury withdraws only settled portion when both states coexist", async () => {
+    const { owner, payer, buyer, token, escrow, tokenAddr, escrowAddr, treasuryAddr } =
+      await deployFresh();
+    const { domainHash } = ids();
+    const a = 100_000_000n;
+    const b = 250_000_000n;
+    const inv1 = ethers.keccak256(ethers.toUtf8Bytes("pi_settled"));
+    const inv2 = ethers.keccak256(ethers.toUtf8Bytes("pi_pending"));
+
+    await (await token.connect(payer).approve(escrowAddr, a + b)).wait();
+    await escrow
+      .connect(payer)
+      .deposit(await buyer.getAddress(), inv1, domainHash, tokenAddr, a);
+    await escrow
+      .connect(payer)
+      .deposit(await buyer.getAddress(), inv2, domainHash, tokenAddr, b);
+
+    await escrow.connect(owner).settle(inv1);
+
+    expect(await escrow.lockedLiability(tokenAddr)).to.equal(b);
+    expect(await escrow.withdrawableBalance(tokenAddr)).to.equal(a);
+    expect(await token.balanceOf(escrowAddr)).to.equal(a + b);
+
+    // Sweeping a+1 must revert (would dip into still-DEPOSITED inv2).
+    await expect(escrow.connect(owner).withdrawTreasury(tokenAddr, a + 1n))
+      .to.be.revertedWithCustomError(escrow, "InsufficientWithdrawable");
+
+    // Sweeping a is fine; pending invoice's funds remain in escrow.
+    await escrow.connect(owner).withdrawTreasury(tokenAddr, a);
+    expect(await token.balanceOf(treasuryAddr)).to.equal(a);
+    expect(await token.balanceOf(escrowAddr)).to.equal(b);
+    expect(await escrow.withdrawableBalance(tokenAddr)).to.equal(0n);
+    expect(await escrow.lockedLiability(tokenAddr)).to.equal(b);
+
+    // After sweeping settled funds, refund of pending invoice still works.
+    const payerBefore = await token.balanceOf(await payer.getAddress());
+    await escrow.connect(owner).refund(inv2);
+    expect(await token.balanceOf(await payer.getAddress())).to.equal(payerBefore + b);
+    expect(await token.balanceOf(escrowAddr)).to.equal(0n);
+    expect(await escrow.lockedLiability(tokenAddr)).to.equal(0n);
+  });
+
+  it("withdrawTreasury rejects amount = 0", async () => {
+    const { owner, escrow, tokenAddr } = await deployFresh();
+    await expect(escrow.connect(owner).withdrawTreasury(tokenAddr, 0n))
+      .to.be.revertedWithCustomError(escrow, "InvalidAmount");
+  });
+
+  it("setTreasury updates the sink and is owner-only / non-zero", async () => {
+    const { owner, other, escrow, treasuryAddr } = await deployFresh();
+    const newSink = await other.getAddress();
+
+    await expect(escrow.connect(other).setTreasury(newSink))
+      .to.be.revertedWithCustomError(escrow, "OwnableUnauthorizedAccount");
+
+    await expect(escrow.connect(owner).setTreasury(ZERO_ADDR))
+      .to.be.revertedWithCustomError(escrow, "InvalidTreasury");
+
+    await expect(escrow.connect(owner).setTreasury(newSink))
+      .to.emit(escrow, "TreasurySet")
+      .withArgs(treasuryAddr, newSink);
+
+    expect(await escrow.treasury()).to.equal(newSink);
+  });
+
+  it("withdrawTreasury sends to the latest treasury after setTreasury", async () => {
+    const { owner, payer, buyer, other, token, escrow, tokenAddr, escrowAddr } =
+      await deployFresh();
+    const { invoiceId, domainHash } = ids();
+    const amount = 199_000_000n;
+    await (await token.connect(payer).approve(escrowAddr, amount)).wait();
+    await escrow
+      .connect(payer)
+      .deposit(await buyer.getAddress(), invoiceId, domainHash, tokenAddr, amount);
+    await escrow.connect(owner).settle(invoiceId);
+
+    const newSink = await other.getAddress();
+    await escrow.connect(owner).setTreasury(newSink);
+
+    const before = await token.balanceOf(newSink);
+    await escrow.connect(owner).withdrawTreasury(tokenAddr, amount);
+    expect(await token.balanceOf(newSink)).to.equal(before + amount);
+  });
+
+  it("stray transfers (donations) are NOT withdrawable through withdrawTreasury", async () => {
+    // Strict ledger: only `settle()` increases `withdrawableBalance`. A
+    // direct ERC-20 transfer to the contract bumps the on-chain balance
+    // but does NOT make funds sweepable. This is intentional — it keeps
+    // the contract a closed accounting system over its known invoices.
+    const { owner, payer, buyer, other, token, escrow, tokenAddr, escrowAddr } =
+      await deployFresh();
+    const { invoiceId, domainHash } = ids();
+    const amount = 199_000_000n;
+    await (await token.connect(payer).approve(escrowAddr, amount)).wait();
+    await escrow
+      .connect(payer)
+      .deposit(await buyer.getAddress(), invoiceId, domainHash, tokenAddr, amount);
+
+    // Donation: another wallet sends tokens directly to the escrow.
+    const donation = 50_000_000n;
+    await (await token.mint(await other.getAddress(), donation)).wait();
+    await (await token.connect(other).transfer(escrowAddr, donation)).wait();
+
+    // Buckets unchanged by the donation.
+    expect(await escrow.lockedLiability(tokenAddr)).to.equal(amount);
+    expect(await escrow.withdrawableBalance(tokenAddr)).to.equal(0n);
+    // Owner cannot sweep the donation (no path).
+    await expect(escrow.connect(owner).withdrawTreasury(tokenAddr, 1n))
+      .to.be.revertedWithCustomError(escrow, "InsufficientWithdrawable");
+
+    // Refund still pays exactly `amount` to payer; donation stays stuck.
+    const payerBefore = await token.balanceOf(await payer.getAddress());
+    await escrow.connect(owner).refund(invoiceId);
+    expect(await token.balanceOf(await payer.getAddress())).to.equal(payerBefore + amount);
+    expect(await token.balanceOf(escrowAddr)).to.equal(donation);
+    expect(await escrow.lockedLiability(tokenAddr)).to.equal(0n);
+    expect(await escrow.withdrawableBalance(tokenAddr)).to.equal(0n);
   });
 
 });
