@@ -9,6 +9,8 @@
     "node": "hardhat node",
     "deploy:base-sepolia": "hardhat run scripts/deploy.ts --network baseSepolia",
     "deploy:base": "hardhat run scripts/deploy.ts --network base",
+    "deploy-anchor:base-sepolia": "hardhat run scripts/deployGaoDomainAnchor.ts --network baseSepolia",
+    "deploy-anchor:base": "hardhat run scripts/deployGaoDomainAnchor.ts --network base",
     "verify:base-sepolia": "hardhat verify --network baseSepolia",
     "verify:base": "hardhat verify --network base",
     "clean": "hardhat clean"
