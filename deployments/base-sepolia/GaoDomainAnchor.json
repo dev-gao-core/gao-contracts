@@ -1,0 +1,11 @@
+{
+  "contractName": "GaoDomainAnchor",
+  "chain": "base-sepolia",
+  "chainId": 84532,
+  "address": "0x8e7d2DA9BedC2c1Fbc7B6d423B9bd175EFD9619e",
+  "deployer": "0xEbD284F02a4EC19945EE35fB9e03c8a603735781",
+  "txHash": "0xa6adef1e49252479d0ea9b86d53eba875adccfbc6e098ee97c9ec924ade5f589",
+  "deployedAt": "2026-04-28T15:12:32.928Z",
+  "abiPath": "abis/GaoDomainAnchor.json",
+  "workerEnvVar": "BASE_SEPOLIA_ANCHOR_CONTRACT_ADDRESS"
+}
