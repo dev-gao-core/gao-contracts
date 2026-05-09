@@ -1,0 +1,25 @@
+# Gao Contracts CODEOWNERS
+# Security-critical smart contract, deployment, and CI paths require explicit owner review.
+# Filed as part of PR-1 / H-9 audit remediation.
+
+* @nftpayclub
+
+# Smart contracts
+/contracts/ @nftpayclub
+
+# Deployment and scripts
+/scripts/ @nftpayclub
+/deployments/ @nftpayclub
+/ignition/ @nftpayclub
+/hardhat.config.* @nftpayclub
+
+# Tests and dependencies
+/test/ @nftpayclub
+/package.json @nftpayclub
+/package-lock.json @nftpayclub
+/pnpm-lock.yaml @nftpayclub
+/yarn.lock @nftpayclub
+
+# GitHub governance / CI
+/.github/workflows/ @nftpayclub
+/.github/CODEOWNERS @nftpayclub
