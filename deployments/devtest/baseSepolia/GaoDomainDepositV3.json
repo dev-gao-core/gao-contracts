@@ -1,0 +1,23 @@
+{
+  "contract": "GaoDomainDepositV3",
+  "tier": "devtest",
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "address": "0xF2e3db266d631193836351809EA584fF1fEe3604",
+  "deployer": "0xEbD284F02a4EC19945EE35fB9e03c8a603735781",
+  "owner": "0xEbD284F02a4EC19945EE35fB9e03c8a603735781",
+  "treasury": "0x36cC88093d47334327A5CAE3a1E65F1C326fBFB1",
+  "allowedToken": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  "deployTxHash": "0xdf1cc13dbb77348a4b9211ad2384e9999f4b8dac1f159ca782f6ca91a33be895",
+  "setAllowedTokenTxHash": "0x75eb25751e0e72c18a779baa27a38ddd18484524b4b471778dae313260732884",
+  "deployedAt": "2026-05-12T02:42:00Z",
+  "sourceSHA": "18c9b763c82fc94c9b8f2adda3bebaa498dda9a0",
+  "notes": [
+    "Dev/test deploy. NOT PRODUCTION.",
+    "Deployer == owner (signer-as-owner default; operator may transferOwnership later).",
+    "Allowed token is the canonical Base Sepolia USDC at 0x036CbD53842c5426634e7929541eC2318f3dCF7e.",
+    "Post-deploy verify in the deploy script returned a false-alarm allowedTokens=false due to RPC tip-lag.",
+    "Verified separately by scripts/reverifyV3.ts — allowedTokens(USDC)=true on fresh read.",
+    "Source verification on Basescan was NOT executed (BASESCAN_API_KEY blank in operator env)."
+  ]
+}

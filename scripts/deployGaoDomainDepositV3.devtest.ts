@@ -142,6 +142,29 @@ function requireEnv(name: string): string {
   return v;
 }
 
+/** Try each candidate env-var name in order; return the first
+ *  non-empty value. Throws if none are set. Used to accept both the
+ *  legacy `GAO_*` names (for V2-era operator scripts) AND the V3
+ *  operator `.env` shape (`V3_TREASURY_ADDRESS` /
+ *  `V3_ALLOWED_TOKEN_ADDRESSES`). */
+function requireEnvAny(...names: string[]): string {
+  for (const n of names) {
+    const v = process.env[n]?.trim();
+    if (v) return v;
+  }
+  throw new Error(
+    `Missing required env. Set one of: ${names.join(", ")}.`,
+  );
+}
+
+function readEnvAny(...names: string[]): string | undefined {
+  for (const n of names) {
+    const v = process.env[n]?.trim();
+    if (v) return v;
+  }
+  return undefined;
+}
+
 function isAddress(s: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(s);
 }
@@ -150,6 +173,15 @@ function checksumOrThrow(label: string, raw: string): string {
   const t = raw.trim();
   if (!isAddress(t)) throw new Error(`${label} is not a 40-hex EVM address`);
   return ethers.getAddress(t);
+}
+
+/** Operator-supplied allowed-token field may be either a single
+ *  address or a CSV of addresses. The dev/test deploy accepts the
+ *  first entry as the canonical USDC and ignores the rest with a
+ *  warning. */
+function firstFromCsv(raw: string): string {
+  const first = raw.split(",")[0]?.trim() ?? "";
+  return first;
 }
 
 async function main(): Promise<void> {
@@ -172,15 +204,32 @@ async function main(): Promise<void> {
     );
   }
 
-  const ownerAddr    = checksumOrThrow("GAO_OWNER_ADDRESS",    requireEnv("GAO_OWNER_ADDRESS"));
-  const treasuryAddr = checksumOrThrow("GAO_TREASURY_ADDRESS", requireEnv("GAO_TREASURY_ADDRESS"));
-  const usdcAddr     = checksumOrThrow("GAO_USDC_ADDRESS",     requireEnv("GAO_USDC_ADDRESS"));
+  // Env-name resolution — accept either the V2-era `GAO_*` names
+  // or the V3 operator-supplied `V3_*` names (see
+  // `docs/deployments/devtest/gao-domain-deposit-v3-2026-05-11.md`
+  // Part B for the canonical V3 names).
+  const treasuryRaw = requireEnvAny("GAO_TREASURY_ADDRESS", "V3_TREASURY_ADDRESS");
+  const usdcRaw     = firstFromCsv(
+    requireEnvAny("GAO_USDC_ADDRESS", "V3_USDC_ADDRESS", "V3_ALLOWED_TOKEN_ADDRESSES"),
+  );
+  const treasuryAddr = checksumOrThrow("treasury", treasuryRaw);
+  const usdcAddr     = checksumOrThrow("allowed token", usdcRaw);
 
   const [signer] = await ethers.getSigners();
   if (!signer) {
     throw new Error("No signer; DEPLOYER_PRIVATE_KEY missing from env.");
   }
   const signerAddr = await signer.getAddress();
+
+  // Owner: explicit env (GAO_OWNER_ADDRESS / V3_OWNER_ADDRESS) wins.
+  // Default to the deployer signer address if no explicit owner is
+  // supplied — the canonical dev/test pattern where the deployer
+  // EOA is itself the V3 owner. The post-deploy verify still
+  // confirms `owner()` matches whichever address we passed.
+  const ownerEnvRaw = readEnvAny("GAO_OWNER_ADDRESS", "V3_OWNER_ADDRESS");
+  const ownerAddr = ownerEnvRaw
+    ? checksumOrThrow("owner", ownerEnvRaw)
+    : signerAddr;
 
   console.log("─".repeat(72));
   console.log("Deploy GaoDomainDepositV3 (DEV/TEST)");
