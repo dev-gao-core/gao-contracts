@@ -112,7 +112,16 @@ function stripLineAndBlockComments(s: string): string {
 }
 
 function stripMarkdownLineComments(s: string): string {
-  return s.replace(/<!--[\s\S]*?-->/g, "");
+  // Loop until fixed point so a hostile input containing a
+  // partial comment fragment can't survive a single replace
+  // pass (CodeQL js/incomplete-multi-character-sanitization).
+  let prev: string;
+  let cur = s;
+  do {
+    prev = cur;
+    cur = cur.replace(/<!--[\s\S]*?-->/g, "");
+  } while (cur !== prev);
+  return cur;
 }
 
 describe("CLAUDE.md §4 — Agent secret-handling", () => {
