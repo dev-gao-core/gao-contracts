@@ -5,15 +5,23 @@
 > No mainnet address changed. No secrets printed. Production launch
 > remains BLOCKED.
 >
-> Source revision: `bc349c5c19d7a1f1f79d0e11a9d8fe2bd2fc9481`
-> (`main` of `dev-gao-core/gao-contracts`).
+> Source revision (ephemeral evidence in Part A): `bc349c5c19d7a1f1f79d0e11a9d8fe2bd2fc9481`.
+> Source revision (live Base Sepolia evidence in Part C): `18c9b763c82fc94c9b8f2adda3bebaa498dda9a0`
+> (`main` of `dev-gao-core/gao-contracts` after PR #11 merged + env-name shim).
 >
-> Artifacts in this PR:
+> Artifacts:
 > - `scripts/deployGaoDomainDepositV3.devtest.ts` — dev/test-only
 >   deploy script (chain-id allowlist, mainnet banlist, dry-run by
->   default, public-value-only logging).
+>   default, public-value-only logging, env-name shim accepting
+>   either `GAO_*` or `V3_*` names).
 > - `scripts/smokeGaoDomainDepositV3.devtest.ts` — 12-case smoke
->   harness with ephemeral (in-memory) and live modes.
+>   harness with ephemeral (in-memory) + live (read-only + LOCK
+>   probe) modes; accepts `V3_LIVE_ADDRESS` or `V3_ADDRESS`.
+> - `scripts/reverifyV3.ts` — post-deploy on-chain re-verify
+>   used when a deploy script's verify step false-alarms on RPC
+>   tip-lag.
+> - `deployments/devtest/baseSepolia/GaoDomainDepositV3.json` —
+>   live deployment record.
 > - This evidence doc.
 
 ---
@@ -186,22 +194,112 @@ values appear anywhere in the repo or in this evidence doc.**
    - Operator name + workstation hostname (NOT the deployer key
      fingerprint)
 
-### Part C — Base Sepolia live smoke (executed)
+### Part C — Base Sepolia live deploy + smoke (executed 2026-05-12)
 
-> **Awaiting operator execution.** No live smoke has been run from
-> this session — the operator does so from a trusted workstation
-> with credentials this session does not have access to.
+The operator-driven Base Sepolia deploy + read-only smoke ran from
+the operator workstation at 2026-05-12 ~02:42 UTC.
+
+#### Deploy
 
 | Field | Value |
 |---|---|
-| V3 dev/test address (Base Sepolia) | _AWAITING OPERATOR EXECUTION_ |
-| Deploy tx hash | _AWAITING OPERATOR EXECUTION_ |
-| Block number | _AWAITING OPERATOR EXECUTION_ |
-| Basescan verification URL | _AWAITING OPERATOR EXECUTION_ |
-| chainId | `84532` (Base Sepolia) |
-| Smoke S1–S3 (live mode) | _AWAITING OPERATOR EXECUTION_ |
-| Smoke S8 V3 LOCK probe (live mode) | _AWAITING OPERATOR EXECUTION_ |
-| Smoke S4–S7, S9–S12 (operator-run manual, or via a fresh ephemeral V3 with operator wallets) | _AWAITING OPERATOR EXECUTION_ |
+| Network | `baseSepolia` |
+| chainId | `84532` |
+| V3 dev/test address | `0xF2e3db266d631193836351809EA584fF1fEe3604` |
+| Deploy tx hash | `0xdf1cc13dbb77348a4b9211ad2384e9999f4b8dac1f159ca782f6ca91a33be895` |
+| `setAllowedToken` tx hash | `0x75eb25751e0e72c18a779baa27a38ddd18484524b4b471778dae313260732884` |
+| Deployer (public address) | `0xEbD284F02a4EC19945EE35fB9e03c8a603735781` |
+| Owner (post-deploy `owner()`) | `0xEbD284F02a4EC19945EE35fB9e03c8a603735781` (signer-as-owner default) |
+| Treasury (post-deploy `treasury()`) | `0x36cC88093d47334327A5CAE3a1E65F1C326fBFB1` |
+| Allowed token (Base Sepolia USDC) | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
+| Bytecode length | 7358 bytes |
+| 28-selector pre-broadcast check | PASS |
+| Source verified on Basescan | NO (skipped — `BASESCAN_API_KEY` blank in operator env) |
+| Deployment record file | `deployments/devtest/baseSepolia/GaoDomainDepositV3.json` |
+
+> **Note on the deploy script's exit code.** On the live broadcast,
+> the deploy script's post-deploy `allowedTokens(USDC)` read returned
+> `false` ON FIRST READ due to Base Sepolia public-RPC tip-lag — the
+> `setAllowedToken` tx had been included on the write node but the
+> verify-read hit a node still on `latest - 1`. The script's
+> `retryView` helper retries only on thrown errors, not on stale
+> successful reads, so the deploy script exited with code 1 — a
+> **false alarm**, not a real failure. A separate read-only
+> `scripts/reverifyV3.ts` check seconds later confirmed
+> `allowedTokens(USDC) = true` along with every other expected
+> value. The deploy did NOT need to be re-broadcast. Follow-up item:
+> harden `retryView` to also retry when the read returns a value
+> known to be wrong (e.g. expected `true`, got `false`).
+
+#### Re-verify reads (post-RPC-tip propagation)
+
+```
+owner():                       0xEbD284F02a4EC19945EE35fB9e03c8a603735781  ✓
+treasury():                    0x36cC88093d47334327A5CAE3a1E65F1C326fBFB1  ✓
+allowedTokens(USDC):           true                                       ✓
+paused():                      false                                      ✓
+lockedLiability(USDC):         0                                          ✓
+treasuryWithdrawable(USDC):    0                                          ✓
+totalAffiliateWithdrawable:    0                                          ✓
+```
+
+#### Smoke (live read-only subset)
+
+Smoke harness run: `V3_ADDRESS=0xF2e3db266d631193836351809EA584fF1fEe3604
+npx hardhat run scripts/smokeGaoDomainDepositV3.devtest.ts --network baseSepolia`
+(without `CONFIRM_SMOKE_V3=true` → read-only + LOCK-probe subset).
+
+| # | Case | Live result | Detail |
+|---|---|---|---|
+| S1 | contract owner matches expected | **PASS** | `owner()` == `0xEbD284F02a4EC19945EE35fB9e03c8a603735781` |
+| S2 | treasury matches expected | **PASS** | `treasury()` == `0x36cC88093d47334327A5CAE3a1E65F1C326fBFB1` |
+| S3 | allowed token configured | **PASS** | `allowedTokens(0x036CbD53842c5426634e7929541eC2318f3dCF7e)` == `true` |
+| S4 | deposit succeeds when unpaused | **SKIPPED** | live — requires operator-funded payer with Base Sepolia USDC + approval |
+| S5 | pause blocks deposit | **SKIPPED** | live — requires live deposit |
+| S6 | settle owner-only | **SKIPPED** | live — requires live deposit |
+| S7 | settle credits ledger only | **SKIPPED** | live — requires live deposit |
+| S8 | public `withdrawAffiliate` reverts (V3 LOCK — `AffiliateSelfWithdrawDisabled`) | **PASS** | reverted as expected on the deployed contract |
+| S9 | owner `withdrawAffiliateFor` unpaused | **SKIPPED** | live — requires live deposit + accrued credit |
+| S10 | `withdrawAffiliateFor` reverts when paused | **SKIPPED** | live — requires live deposit + accrued credit |
+| S11 | `withdrawTreasury` succeeds even when paused | **SKIPPED** | live — requires settled treasury bucket |
+| S12 | refund + rescue + invariant hold | **SKIPPED** | live — requires live deposit |
+
+**Active live cases: 4/4 PASS. Skipped (operator-funded paths): 8.**
+
+The ephemeral smoke in Part A exercises every mutating path against
+an identical-bytecode V3 instance (12/12 PASS, including S4–S7,
+S9–S12). To exercise the mutating subset on the live Base Sepolia
+deployment, the operator funds a payer wallet with Base Sepolia
+USDC + re-runs the smoke harness with `CONFIRM_SMOKE_V3=true`.
+
+#### Basescan verification status
+
+`BASESCAN_API_KEY` was blank in the operator environment at deploy
+time, so the source-code verification step was **skipped**. The
+deployed bytecode at `0xF2e3db266d631193836351809EA584fF1fEe3604`
+can be verified after the fact via:
+
+```sh
+BASESCAN_API_KEY=<set> \
+  npx hardhat verify --network baseSepolia \
+    0xF2e3db266d631193836351809EA584fF1fEe3604 \
+    0xEbD284F02a4EC19945EE35fB9e03c8a603735781 \
+    0x36cC88093d47334327A5CAE3a1E65F1C326fBFB1
+```
+
+Captured as a follow-up item.
+
+#### Env-name compatibility shim landed alongside this evidence
+
+The operator's `.env` shape used `V3_TREASURY_ADDRESS` and
+`V3_ALLOWED_TOKEN_ADDRESSES` (CSV) where the deploy script
+originally required `GAO_TREASURY_ADDRESS` / `GAO_USDC_ADDRESS`.
+This PR lands a compatibility shim that accepts either set of
+names without code change to the operator's workstation. The
+shim also defaults `owner` to the deployer signer when no
+`GAO_OWNER_ADDRESS` / `V3_OWNER_ADDRESS` is supplied (the dev/test
+pattern used in this deploy). Live mode smoke also now accepts
+`V3_ADDRESS` as a synonym for `V3_LIVE_ADDRESS`.
 
 ## Part D — Storage hygiene + scope
 
@@ -228,9 +326,11 @@ independent items:
 
 | Blocker | State |
 |---|---|
+| Live Base Sepolia V3 deploy + smoke (read-only subset) | **EXECUTED** 2026-05-12 — see Part C. V3 at `0xF2e3db266d631193836351809EA584fF1fEe3604`. |
+| Live Base Sepolia V3 mutating smoke (S4–S7, S9–S12) with operator-funded payer | NOT EXECUTED |
+| Basescan source verification of the deployed V3 | NOT EXECUTED — `BASESCAN_API_KEY` blank at deploy time; runnable after the fact |
 | V2 dev/test drain + decommission **rehearsal** (exercise the migration runbook against a dev/test V2; capture evidence) | NOT EXECUTED |
 | BE dev/test switch to V3 (`gao-id-worker` `GAO_DOMAIN_ESCROW_ADDRESS` flip in dev/test) | NOT EXECUTED |
-| Live Base Sepolia V3 deploy + smoke (operator-only, per Part B above) | NOT EXECUTED |
 | Third-party audit of V3 source | NOT COMMISSIONED |
 | H-9 first deployer-key rotation (runbook in `gao-id-worker/docs/runbooks/h9-deployer-key-rotation.md`) | NOT EXECUTED |
 | Regenerated audit baseline (incorporating BE Impl-A → Impl-F + V3 deploy evidence) | NOT REGENERATED |

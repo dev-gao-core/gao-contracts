@@ -94,14 +94,26 @@ async function main(): Promise<void> {
     );
   }
 
-  const liveAddress = process.env.V3_LIVE_ADDRESS?.trim();
+  // Accept either V3_LIVE_ADDRESS (canonical) or V3_ADDRESS
+  // (operator-supplied shorthand) for the live-mode address.
+  const liveAddress =
+    process.env.V3_LIVE_ADDRESS?.trim() ||
+    process.env.V3_ADDRESS?.trim() ||
+    undefined;
   const mode: "ephemeral" | "live" = liveAddress ? "live" : "ephemeral";
 
+  // Live mode against a deployed V3 runs (a) read-only cases
+  // unconditionally and (b) owner-only mutating cases ONLY when
+  // CONFIRM_SMOKE_V3=true is also set. The split lets an operator
+  // sanity-check a fresh deploy with just V3_ADDRESS=0x... without
+  // a separate confirmation flag.
   if (mode === "live" && process.env.CONFIRM_SMOKE_V3 !== "true") {
-    throw new Error(
-      "Live mode requires CONFIRM_SMOKE_V3=true. The smoke runs owner-only " +
-        "writes on the live contract; the operator must explicitly confirm.",
-    );
+    console.log("");
+    console.log("Note: CONFIRM_SMOKE_V3 is unset; running READ-ONLY subset only.");
+    console.log("  (S1 owner, S2 treasury, S3 allowlist, S8 V3 LOCK probe.)");
+    console.log("  To run state-mutating smoke cases against a live deploy,");
+    console.log("  re-run with CONFIRM_SMOKE_V3=true.");
+    console.log("");
   }
 
   logHeader(`Smoke GaoDomainDepositV3 (DEV/TEST) — ${mode.toUpperCase()} mode`);
@@ -157,12 +169,21 @@ async function main(): Promise<void> {
     await (await escrow.connect(owner).setAllowedToken(tokenAddr, true)).wait();
     await (await token.mint(await payer.getAddress(), 10_000_000_000n)).wait();
   } else {
-    logHeader("Live setup: attach to deployed V3 + caller-supplied USDC");
-    const usdc = process.env.GAO_USDC_ADDRESS?.trim();
-    if (!usdc || !/^0x[0-9a-fA-F]{40}$/.test(usdc)) {
-      throw new Error("Live mode requires GAO_USDC_ADDRESS to be a checksummed 40-hex address.");
+    logHeader("Live setup: attach to deployed V3 + caller-supplied token");
+    // Accept either GAO_USDC_ADDRESS (canonical) or
+    // V3_USDC_ADDRESS / V3_ALLOWED_TOKEN_ADDRESSES (operator-supplied).
+    // V3_ALLOWED_TOKEN_ADDRESSES may be a CSV — take the first entry.
+    const usdcRaw =
+      process.env.GAO_USDC_ADDRESS?.trim() ||
+      process.env.V3_USDC_ADDRESS?.trim() ||
+      process.env.V3_ALLOWED_TOKEN_ADDRESSES?.split(",")[0]?.trim() ||
+      "";
+    if (!usdcRaw || !/^0x[0-9a-fA-F]{40}$/.test(usdcRaw)) {
+      throw new Error(
+        "Live mode requires a token address. Set one of: GAO_USDC_ADDRESS, V3_USDC_ADDRESS, V3_ALLOWED_TOKEN_ADDRESSES.",
+      );
     }
-    tokenAddr = ethers.getAddress(usdc);
+    tokenAddr = ethers.getAddress(usdcRaw);
     escrow = (await ethers.getContractAt("GaoDomainDepositV3", liveAddress!)) as unknown as typeof escrow;
     token = (await ethers.getContractAt("IERC20", tokenAddr)) as unknown as typeof token;
     escrowAddr = liveAddress!;
