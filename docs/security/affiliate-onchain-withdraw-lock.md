@@ -1,19 +1,23 @@
-# Affiliate Onchain Withdraw Lock — V2 Analysis & V3 Spec
+# Affiliate Onchain Withdraw Lock — V2 Analysis & V3 Spec & Implementation
 
-> **Docs-only.** Analyses the deployed `GaoDomainDepositV2` contract
-> at Base Sepolia `0xd14fa3fb57494d23C21C2E8a3B7b7b06a3A312f0`,
-> proves that **public `withdrawAffiliate(address,uint256)` cannot
-> be selectively locked on the deployed V2**, and specifies a `V3`
-> contract that removes the self-service affiliate withdraw entirely.
+> **V3 implementation landed (source + tests).** This doc retains
+> the V2 analysis + V3 spec for historical context; the
+> implementation, test matrix, and migration ceremony are now
+> tracked alongside the source:
 >
-> **No contract is deployed in this PR.** Implementation of `V3` is
-> deferred to a separate operator-approved PR.
+>   * Contract: `contracts/GaoDomainDepositV3.sol`
+>   * Tests:    `test/GaoDomainDepositV3.test.ts` (47 V3 cases)
+>   * Migration runbook: `docs/runbooks/v2-to-v3-escrow-migration.md`
 >
-> Production launch remains **BLOCKED** until V3 (or equivalent) is
-> deployed, V2 is drained + decommissioned, and the BE pre-audit
-> blocker sequence (`gao-id-worker` PR 1 / 1B / 2 / 3 / 4 / 5 +
-> regenerated audit baseline + H-9 first rotation + operator
-> production cutover approval) is complete.
+> **No contract is deployed by the implementation PR.** Deployment
+> is an operator-only step per the migration runbook.
+>
+> Production launch remains **BLOCKED** until V3 is deployed to
+> mainnet, V2 is drained + decommissioned, the BE pre-audit blocker
+> sequence (`gao-id-worker` Owner-Only Admin Access Impl-A through
+> Impl-F + regenerated audit baseline + H-9 first rotation +
+> operator production cutover approval) is complete, AND a
+> third-party audit of V3 source has been completed.
 
 ---
 
@@ -215,33 +219,71 @@ This risk window is bounded by the operator's drain pace. The
 operator should aim to drain V2 within a single business day after
 flipping `AFFILIATE_LEDGER_CREDIT_ENABLED=false`.
 
-## 9. What this PR ships
+## 9. What was shipped
+
+**Original spec-only PR (#9, merged):**
 
 - **This document** (`docs/security/affiliate-onchain-withdraw-lock.md`).
-- **No V3 contract source.** V3 implementation lands in a separate
-  operator-approved PR after the operator confirms the V3 spec in
-  §5 (specifically: whether onchain two-person rule is wanted in
-  addition to BE-side two-person rule).
-- **No tests.** Test matrix (§6) is the contract for the V3
-  implementation PR.
-- **No deployment script.** V3 migration ceremony (§7) is the
-  operator-only runbook the V3 implementation PR will ship alongside
-  the new Solidity source.
+- No V3 contract source. No tests. No deployment script.
+
+**V3 implementation PR (`GaoDomainDepositV3 Affiliate Withdraw
+Lock`, this revision):**
+
+- `contracts/GaoDomainDepositV3.sol` — full Solidity source
+  implementing the §5 spec WITHOUT the optional §5.3 onchain
+  two-person rule (BE-side Impl-D + Impl-E in `gao-id-worker`
+  provides the equivalent off-chain guarantee). V3 changes vs V2:
+  - `withdrawAffiliate(address,uint256)` ALWAYS reverts with custom
+    error `AffiliateSelfWithdrawDisabled`. The V2 selector is
+    preserved so old clients fail loudly, not silently.
+  - `withdrawAffiliateFor(affiliate, token, amount)` is now
+    `whenNotPaused`. Pausing V3 halts the affiliate payout pipeline.
+  - Everything else (deposit / settle / refund / withdrawTreasury /
+    rescueExcessToken / events / storage layout / selectors / read
+    shape) is byte-identical to V2. The BE adapter that reads V2
+    reads V3 unchanged.
+- `test/GaoDomainDepositV3.test.ts` — 47 tests:
+  - 5 cases on `withdrawAffiliate` self-withdraw revert (affiliate /
+    random / owner / zero-amount / zero-credit).
+  - 11 cases on `withdrawAffiliateFor` owner-driven payout (happy /
+    non-owner / affiliate-as-caller / paused / resume / redirect
+    attempt / cross-affiliate drain / zero-address / zero-amount /
+    over-balance / token=0).
+  - 3 cases on `settle` ledger-only (no auto-push) semantics
+    including ERC-20 Transfer-event absence.
+  - 2 cases on treasury-withdraw remaining non-paused per spec.
+  - 23 V2-safety regression cases (constructor / setTreasury /
+    setAllowedToken / deposit / pause-blocks-deposit / settle
+    happy + revert paths / refund / treasury withdraw / rescue /
+    invariants / non-owner refusal of every onlyOwner function).
+  - 3 ABI/storage compatibility cases (selectors byte-equal to V2,
+    storage getter shape preserved, getDeposit returns same
+    11-tuple).
+- `docs/runbooks/v2-to-v3-escrow-migration.md` — operator-only
+  migration ceremony (deploy V3 / smoke V3 / pause V2 / drain V2 /
+  hard-block V2 in BE config / switch BE to V3 / decommission V2 /
+  evidence checklist / rollback conditions / production cutover
+  gate).
+- **No deployment script for mainnet.** No `wrangler secret put`.
+  No `npx hardhat run scripts/deployV3.ts`. The V3 deploy is
+  operator-driven from a trusted workstation as documented in the
+  migration runbook.
 
 ## 10. Status language (do not weaken)
 
 - Public V2 `withdrawAffiliate(address,uint256)` is a **PRODUCTION
   BLOCKER**.
 - V2 is **immutable** — no upgrade path on the deployed bytecode.
-- **V3 (or equivalent) deployment is required** before production
-  launch.
-- This PR does not deploy V3. It establishes the rationale and the
-  spec.
+- **V3 source + tests have landed.** V3 is **NOT deployed.**
+- **V3 deployment is required** before production launch.
 - BE-side guardrails (`AFFILIATE_LEDGER_CREDIT_ENABLED=false`,
   admin-only `withdrawAffiliateFor` queue) are **necessary but not
   sufficient**: they prevent new accrual but cannot defend against
-  affiliates withdrawing accumulated balances unilaterally.
-- Production launch remains **BLOCKED**.
+  affiliates withdrawing accumulated balances unilaterally on V2.
+- Production launch remains **BLOCKED** until V3 is deployed to
+  mainnet, V2 is drained + decommissioned, a third-party audit of
+  V3 source is completed, and the BE pre-audit blocker sequence is
+  complete.
 
 ## 11. Open questions for operator review
 
