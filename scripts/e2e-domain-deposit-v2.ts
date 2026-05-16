@@ -49,6 +49,33 @@ import { ethers, network } from "hardhat";
 
 const DEPRECATED_V1_ESCROW = "0xcfc746df306fa0c4512ca98f83ac7b6b143c2a13";
 
+/** Chain ids the dev/test E2E script will broadcast against. Mirrors
+ *  the V3 dev/test deploy / smoke / anchor scripts for a single
+ *  consistent dev/test posture. CC-4b fix — Contracts Round 1. */
+const ALLOWED_DEVTEST_CHAIN_IDS: ReadonlySet<number> = new Set([
+  // Hardhat in-memory + standalone node — used by tests + local repl.
+  31337, 1337,
+  // Base Sepolia — the canonical dev/test L2 for Gao.
+  84532,
+  // Ethereum Sepolia — secondary dev/test target.
+  11155111,
+  // Sepolia legacy id — kept for completeness.
+  5,
+]);
+
+/** Mainnet chain ids the script explicitly refuses, even if
+ *  `CONFIRM_E2E_DOMAIN_DEPOSIT_V2=true` is set AND the allowlist were
+ *  misconfigured. Belt-and-braces second gate. */
+const BANNED_MAINNET_CHAIN_IDS: ReadonlySet<number> = new Set([
+  1,          // Ethereum
+  8453,       // Base
+  10,         // Optimism
+  137,        // Polygon
+  42161,      // Arbitrum One
+  56,         // BNB Smart Chain
+  43114,      // Avalanche C-Chain
+]);
+
 function reqEnv(name: string): string {
   const v = process.env[name]?.trim();
   if (!v) throw new Error(`Missing required env: ${name}`);
@@ -68,6 +95,34 @@ function fmtUsdc(raw: bigint): string {
 }
 
 async function main(): Promise<void> {
+  // ── Chain guards (run BEFORE any deposit/settle/withdraw call) ────
+  //
+  // CC-4b fix. The earlier version only logged the chainId; an
+  // operator typo like `--network base` plus
+  // `CONFIRM_E2E_DOMAIN_DEPOSIT_V2=true` would have broadcast a full
+  // deposit→settle→withdraw flow on Base mainnet. Now mainnet is
+  // refused unconditionally and only dev/test chain ids are accepted.
+  const chainId = network.config.chainId;
+  if (typeof chainId !== "number") {
+    throw new Error(
+      "REFUSED: network.config.chainId is undefined. Specify a known --network.",
+    );
+  }
+  if (BANNED_MAINNET_CHAIN_IDS.has(chainId)) {
+    throw new Error(
+      `REFUSED: chainId ${chainId} is a mainnet. The e2e-domain-deposit-v2 ` +
+        `script is dev/test only and refuses mainnet even when ` +
+        `CONFIRM_E2E_DOMAIN_DEPOSIT_V2=true is set.`,
+    );
+  }
+  if (!ALLOWED_DEVTEST_CHAIN_IDS.has(chainId)) {
+    throw new Error(
+      `REFUSED: chainId ${chainId} is not on the e2e dev/test allowlist ` +
+        `(${Array.from(ALLOWED_DEVTEST_CHAIN_IDS).join(", ")}). ` +
+        `Update ALLOWED_DEVTEST_CHAIN_IDS via PR to add a new dev/test chain.`,
+    );
+  }
+
   const escrowAddr = ethers.getAddress(reqEnv("ESCROW_ADDRESS"));
   if (escrowAddr.toLowerCase() === DEPRECATED_V1_ESCROW) {
     throw new Error(

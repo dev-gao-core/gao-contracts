@@ -72,14 +72,18 @@ describe("CC-2 — legacy V1 deploy: npm-script surface", () => {
     }
   });
 
-  it("STILL exposes the anchor + verify helpers (no over-removal)", () => {
+  it("STILL exposes the anchor (dev/test only) + verify helpers (no over-removal)", () => {
+    // CC-4a follow-up: `deploy-anchor:base` (the anchor mainnet
+    // wrapper) was removed in the PR that hardens
+    // `deployGaoDomainAnchor.ts`. Anchor mainnet deploys live in
+    // the private ops repo. The dev/test anchor wrapper stays.
     const scripts = readPackage().scripts ?? {};
     expect(scripts).to.have.property("compile");
     expect(scripts).to.have.property("test");
     expect(scripts).to.have.property("verify:base-sepolia");
     expect(scripts).to.have.property("verify:base");
     expect(scripts).to.have.property("deploy-anchor:base-sepolia");
-    expect(scripts).to.have.property("deploy-anchor:base");
+    expect(scripts).to.not.have.property("deploy-anchor:base");
   });
 });
 
