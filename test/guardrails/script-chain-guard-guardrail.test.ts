@@ -1,6 +1,8 @@
 // Script chain-guard guardrails — CI-enforced contracts.
 //
-// Closes Contracts Round 1 findings CC-4a + CC-4b.
+// Closes Contracts Round 1 findings CC-4a + CC-4b. Extended by the
+// CC-4c + CC-4d cleanup PR to assert the two orphan mutation
+// scripts (allow-usdc.ts, finish-deploy-v2.ts) stay deleted.
 //
 // Every script under `scripts/` that can broadcast a transaction
 // MUST carry, at minimum:
@@ -16,15 +18,14 @@
 //     `withdrawAffiliateFor(...)` call.
 //
 // Read-only verifier scripts (`scripts/preflight-domain-deposit-v2.ts`,
-// `scripts/reverifyV3.ts`) are exempt — they never broadcast and the
-// allow-list below records their read-only status.
+// `scripts/reverifyV3.ts`) are exempt — they never broadcast.
 //
-// Cleanup-only mutation scripts that operate on hardcoded V1 / V2
-// dead-contract addresses with chainId hardcoded to dev/test
-// (`scripts/allow-usdc.ts`, `scripts/finish-deploy-v2.ts`,
-// `scripts/refund-old-escrow.ts`) are tracked separately as CC-4c /
-// CC-4d cleanup items — the chainId hardcode is itself a refusal
-// gate, so they pass this guard. Future PRs may retire those.
+// Remaining cleanup-only mutation scripts that operate on the V1
+// dead-contract address (`scripts/refund-old-escrow.ts`) and the
+// legacy V2 deploy entry (`scripts/deploy-domain-deposit-v2.ts`)
+// use an alternative single-value chainId match + their own
+// CONFIRM gate. They are intentionally exempt from the SET-pattern
+// strict matrix.
 //
 // `package.json` must NOT expose a `deploy-anchor:base` npm script
 // (the anchor mainnet deploy must live in the private ops repo).
@@ -210,5 +211,39 @@ describe("CC-4 — legacy V1 deploy path remains absent (CC-2 regression check)"
     const scripts = readPackage().scripts ?? {};
     expect(scripts).to.not.have.property("deploy:base");
     expect(scripts).to.not.have.property("deploy:base-sepolia");
+  });
+});
+
+describe("CC-4c + CC-4d — orphan mutation scripts removed", () => {
+  // Both scripts targeted hardcoded V1/V2 dead-contract addresses on
+  // Base Sepolia. V1 source was removed in PR #14 (CC-2 closure); V2
+  // is no longer canonical (V3 is). These two scripts had no live
+  // purpose and risked future operator confusion. Removed by the
+  // CC-4c + CC-4d cleanup PR. Any future PR that reintroduces either
+  // file fails CI here — operator can either add proper guards +
+  // canonical-path justification, or keep the file out.
+
+  it("scripts/allow-usdc.ts (CC-4c — orphan V1 mutation) is absent", () => {
+    const fs = require("node:fs") as typeof import("node:fs");
+    expect(fs.existsSync(join(REPO_ROOT, "scripts/allow-usdc.ts"))).to.equal(
+      false,
+    );
+  });
+
+  it("scripts/finish-deploy-v2.ts (CC-4d — orphan V2 recovery) is absent", () => {
+    const fs = require("node:fs") as typeof import("node:fs");
+    expect(
+      fs.existsSync(join(REPO_ROOT, "scripts/finish-deploy-v2.ts")),
+    ).to.equal(false);
+  });
+
+  it("no npm-script references either orphan filename", () => {
+    const scripts = readPackage().scripts ?? {};
+    for (const [k, v] of Object.entries(scripts)) {
+      expect(v).to.not.match(
+        /\bscripts\/(allow-usdc|finish-deploy-v2)\.ts\b/,
+        `script "${k}" references a removed orphan file`,
+      );
+    }
   });
 });
