@@ -1,0 +1,81 @@
+# Hardhat compile + test CI for gao-contracts.
+#
+# Why this workflow exists:
+#   The repo previously had no in-repo GitHub Actions workflow that
+#   compiled Solidity or ran `hardhat test`. The CodeQL run visible on
+#   recent PRs comes from GitHub's default code-scanning setup and only
+#   performs JS/TS static analysis — it does NOT compile contracts and
+#   does NOT execute any test. This workflow is the first in-repo CI
+#   gate that catches a regression that would only surface from a
+#   Hardhat compile or test run (stack-too-deep, guardrail failure,
+#   regression in the 56-case multisig matrix, etc.).
+#
+# Scope:
+#   - Pre-merge gate: pull requests targeting `main`.
+#   - Post-merge tip: pushes to `main`. Catches any direct push or
+#     post-merge drift (e.g. if a follow-up commit lands on main
+#     outside a PR flow).
+#
+# Hardening posture:
+#   - `permissions: contents: read` is the only granted permission.
+#     The workflow cannot write to the repo, cannot create releases,
+#     cannot push tags, cannot publish packages.
+#   - `concurrency.cancel-in-progress` cancels stale runs on the same
+#     ref when a new commit arrives — saves CI cost and keeps the
+#     latest commit as the source of truth.
+#   - No secrets are consumed. No `secrets.*` reference appears. The
+#     workflow is fully offline-capable (npm registry + GitHub-hosted
+#     runner + hardhat's in-memory chain at chainId 31337).
+#   - No deploy step, no verify step, no `--network` flag. CI never
+#     broadcasts a transaction.
+#   - Node 20 (matches local-dev baseline). Single version, not a
+#     matrix — a Node-version matrix is a candidate for a future
+#     hardening PR.
+#   - `npm ci` (strict lockfile) rather than `npm install`.
+#   - First-party `actions/*` are pinned to major-version tags
+#     (`@v4`). Exact-sha pinning is a candidate for a future
+#     hardening PR.
+
+name: contracts-ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contracts-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile-and-test:
+    name: compile + test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies (npm ci — strict lockfile)
+        run: npm ci
+
+      - name: Compile contracts
+        run: npx hardhat compile
+
+      - name: Run full Hardhat test suite
+        # Full pass/fail signal across every case (no --bail). Includes:
+        #   * the existing GaoDomain* tests
+        #   * the test/guardrails/* CI-enforcement guardrails (incl. the
+        #     new multisig-no-address-literals guard added in this PR)
+        #   * the 56-case multisig matrix (vault + factory + EIP-712 parity)
+        run: npx hardhat test
