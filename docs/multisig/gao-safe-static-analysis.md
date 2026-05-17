@@ -66,49 +66,38 @@ Upgrade protocol:
 | `exclude_dependencies` | `true` | Skip OpenZeppelin vendored code; OZ has its own audit track. |
 | `detectors_to_exclude` | `naming-convention,solc-version` | Naming follows project convention (see `CLAUDE.md` + `gao-safe-design.md`); Solidity 0.8.24 is intentionally pinned by `hardhat.config.ts`. |
 
-## 7. Baseline (pending first advisory run)
+## 7. Baseline (observed 2026-05-17 on commit a7192f7)
 
-The baseline is recorded after the first advisory CI run on the PR 7 branch. Until then, **no zero-finding claim is made**. The Stage-2 baseline update lands in a second commit on the same branch after the workflow's first execution produces a `slither-report.json` artifact.
+Slither @ 0.10.4 reports zero findings above the advisory thresholds configured in `slither.config.json` on the multisig surface (`contracts/multisig/GaoSafe.sol` + `contracts/multisig/GaoSafeFactory.sol`). Slither's own summary line from the workflow log:
 
-When that artifact lands, this section is replaced with one of:
+> `. analyzed (20 contracts with 91 detectors), 0 result(s) found`
 
-### Stage 2a — Zero findings (if observed)
+The artifact JSON is:
 
-```
-## Baseline (observed YYYY-MM-DD on commit <sha>)
-Slither @ 0.10.4 reports zero findings above the advisory thresholds
-configured in slither.config.json on the multisig surface
-(contracts/multisig/GaoSafe.sol + contracts/multisig/GaoSafeFactory.sol).
-
-Workflow run: <GitHub Actions URL>
-Artifact:     slither-report (90-day retention)
-
-This baseline is advisory only. The workflow remains
-`continue-on-error: true` per §3. Escalation to a required gate is a
-separate operator decision and will land in its own reviewable PR.
+```json
+{
+  "success": true,
+  "error": null,
+  "results": {}
+}
 ```
 
-### Stage 2b — Non-zero findings (if observed)
+- **Workflow run:** https://github.com/dev-gao-core/gao-contracts/actions/runs/25995929926/job/76410288535
+- **Artifact:** `slither-report` (90-day retention; downloadable from the Actions UI)
 
-```
-## Baseline (observed YYYY-MM-DD on commit <sha>)
-Slither @ 0.10.4 reports the following findings on the multisig
-surface. Each is recorded with a one-line disposition.
+This baseline is **advisory only**. The workflow remains `continue-on-error: true` per §3. Escalation to a required gate is a separate operator decision and will land in its own reviewable PR with at least three consecutive prior PRs maintaining the zero-finding baseline.
 
-| detector | severity | file:line | disposition |
-| --- | --- | --- | --- |
-| <detector> | <Critical/High/Medium/Low/Informational> | <path>:<line> | waiver: <one-line rationale> OR fix-plan: <one-line plan> in follow-up PR <ref TBD> |
-| ... | ... | ... | ... |
+GaoSafe Genesis remains pre-audit and is not production-ready. This advisory baseline does not change the production-readiness gate at `gaokey-mobile/docs/multisig/production-readiness-gate.md`; it is an additional reviewer signal that supports §1 of that gate.
 
-Workflow run: <GitHub Actions URL>
-Artifact:     slither-report (90-day retention)
+### Note on config-comment INFO lines
 
-Per the PR 7 plan, NO production Solidity source is modified in PR 7
-to fix findings. Fix-plan dispositions land in separately-reviewed
-follow-up PRs.
-```
+The workflow log contains three informational lines reporting that the `_comment_1`, `_comment_4`, and `_comment_5` keys in `slither.config.json` are unknown to Slither:
 
-If any finding's severity is high enough that documenting it as a waiver would be inappropriate (e.g. a real critical correctness bug), the agent **STOPS and reports** before either the doc edit or any source change. The operator decides whether to fix in PR 7 (which would change PR 7's scope and require explicit re-approval) or to fix in a follow-up PR while PR 7 documents the finding as `fix-plan`.
+> `INFO:Slither:slither.config.json has an unknown key: _comment_1 : ...`
+> `INFO:Slither:slither.config.json has an unknown key: _comment_4 : ...`
+> `INFO:Slither:slither.config.json has an unknown key: _comment_5 : ...`
+
+These keys are inline documentation comments embedded in the JSON because JSON does not natively support comments. The lines are **informational only**, not findings — Slither's "0 result(s) found" summary line is the authoritative finding count. A future trivial PR may move the inline documentation into a markdown sidecar; the cleanup is out of scope for this Stage-2 baseline update.
 
 ## 8. How to read the JSON artifact
 
