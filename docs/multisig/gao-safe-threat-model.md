@@ -72,6 +72,9 @@ Genesis stores only public data (`owners`, `threshold`, `nonce`, `_initialized`)
 | Threshold downgrade attack | A normal multisig proposal — M owners must approve. Mobile-side policy flags every threshold decrease as `danger`. | `GaoSafe.test.ts` #30, #33 |
 | Address squatting on `createVault` | Salt binds `msg.sender`. Different deployers calling with the same `clientSalt` produce different addresses. | `GaoSafeFactory.test.ts` F4 |
 | Direct call to bare implementation's `setup()` | Implementation constructor sets `_initialized = true`. Bare-implementation setup reverts `AlreadyInitialized`. | `GaoSafe.test.ts` #8 |
+| Direct call to bare implementation's `execTransaction()` with zero-length signatures (zero threshold short-circuit) | `execTransaction` refuses up-front if `!_initialized` OR `threshold == 0` OR `_owners.length == 0`. Reverts `NotSetup` before any other check. | `GaoSafe.test.ts` #37 |
+| Manually-deployed EIP-1167 clone that bypasses the factory and never has `setup()` called | Same `NotSetup` guard catches the uninitialised-clone case (where `_initialized == false`). Without this guard, a clone with no owners and zero threshold would accept any zero-length signature bundle. | `GaoSafe.test.ts` #38 |
+| ETH sent directly to the bare implementation singleton (would otherwise be unrecoverable) | `receive()` reverts with `ImplementationCannotReceiveEth` whenever `address(this) == _IMPLEMENTATION_SELF`. The immutable is baked into the singleton's bytecode at deploy and read identically through every clone's delegatecall, so clones still accept ETH while the singleton refuses it outright. | `GaoSafe.test.ts` #39 |
 
 ## 4. Signature bundle invariants (all pinned)
 

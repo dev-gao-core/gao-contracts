@@ -52,6 +52,8 @@ If a boundary capability is ever added in a future release, that release will:
 | Deployer-bound salt | `keccak256(abi.encode(msg.sender, clientSalt))` prevents address squatting |
 | Deterministic address prediction | `computeVaultAddress(deployer, clientSalt)` returns the exact post-deploy address |
 | Implementation singleton lock | Constructor sets `_initialized = true`; bare singleton rejects direct `setup()` |
+| NotSetup guard on execTransaction | `execTransaction` refuses up-front if `!_initialized` OR `threshold == 0` OR `_owners.length == 0`. Defends both the bare implementation and any manually-deployed EIP-1167 clone that bypassed the factory and never had `setup()` called — neither can drain funds through a zero-threshold short-circuit. |
+| Implementation ETH-ingress refusal | `receive()` reverts with `ImplementationCannotReceiveEth` when called against the bare implementation singleton (identified by an immutable `_IMPLEMENTATION_SELF` baked into bytecode). Clone `receive()` still accepts ETH normally. |
 | Clone-safe EIP-712 | Manual `domainSeparator()` + `_hashTypedData(structHash)`; no inheritance of OZ's clone-unsafe `EIP712.sol` |
 | Last-owner removal block | `removeOwner` reverts when `owners.length == 1` |
 

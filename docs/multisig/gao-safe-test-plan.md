@@ -8,12 +8,12 @@
 
 | File | Cases | Subject |
 |---|---|---|
-| [`test/multisig/GaoSafe.test.ts`](../../test/multisig/GaoSafe.test.ts) | 36 (#1–#36) | Vault behaviour: setup, exec happy/rejection, owner-set onlySelf + via-proposal, safety rails, event shapes |
+| [`test/multisig/GaoSafe.test.ts`](../../test/multisig/GaoSafe.test.ts) | 39 (#1–#39) | Vault behaviour: setup, exec happy/rejection, owner-set onlySelf + via-proposal, safety rails, event shapes, bare-impl / uninit-clone hardening |
 | [`test/multisig/GaoSafeFactory.test.ts`](../../test/multisig/GaoSafeFactory.test.ts) | 10 (F1–F10) | Factory: singleton lock, clone determinism, deployer-binding, ABI hygiene |
 | [`test/multisig/GaoSafe.eip712-parity.test.ts`](../../test/multisig/GaoSafe.eip712-parity.test.ts) | 7 (P1–P7) | EIP-712 JS ↔ contract parity for every proposal flavour + clone-safety pin |
 | [`test/multisig/helpers/eip712.ts`](../../test/multisig/helpers/eip712.ts) | n/a (shared helper) | JS-side EIP-712 builder; mirror for gaokey-mobile PR 3 |
 
-**Total: 53 cases. Result on hardhat in-memory chain (chainId 31337): 53 passing.**
+**Total: 56 cases. Result on hardhat in-memory chain (chainId 31337): 56 passing.**
 
 ## 2. Vault matrix (`GaoSafe.test.ts`)
 
@@ -87,6 +87,14 @@
 | 34 | ExecutionSuccess(digest, nonceConsumed) on happy path |
 | 35 | Setup(owners, threshold) on createVault |
 | 36 | receive() accepts ETH and increments vault balance |
+
+### 2.8 Hardening — bare implementation / uninitialized clone guards (#37-#39)
+
+| # | Case | Asserts |
+|---|---|---|
+| 37 | Bare implementation execTransaction with zero signatures reverts (NotSetup) | Defends the bare singleton against zero-threshold short-circuit |
+| 38 | Manually-deployed EIP-1167 clone that bypassed the factory reverts execTransaction (NotSetup) | Defends any uninitialised clone against the same hole |
+| 39 | Sending ETH directly to the bare implementation reverts (ImplementationCannotReceiveEth); clone receive() still accepts ETH | Two halves of the ETH-ingress guard pinned in one case (cross-ref #36 for the clone-accepts side) |
 
 ## 3. Factory matrix (`GaoSafeFactory.test.ts`)
 

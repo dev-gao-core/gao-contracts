@@ -945,4 +945,111 @@ describe("GaoSafe Genesis — vault", () => {
       expect(after - before).to.equal(amount);
     });
   });
+
+  // ── Hardening: bare implementation / uninitialized clone guards ─────
+
+  describe("hardening — bare implementation / uninitialized clone guards", () => {
+    it("#37 bare implementation execTransaction reverts with NotSetup (zero sigs / zero threshold)", async () => {
+      const [s0] = await ethers.getSigners();
+      const F = await ethers.getContractFactory("GaoSafeFactory");
+      const factory = await F.deploy();
+      await factory.waitForDeployment();
+      const implAddr = await factory.implementation();
+      const impl = await ethers.getContractAt("GaoSafe", implAddr);
+
+      // Sanity: the bare implementation has _initialized = true (set
+      // by its constructor) but no owners and zero threshold. Without
+      // the NotSetup guard, an empty signature bundle would satisfy
+      // `signatures.length == 65 * 0` and the inner-call loop would
+      // run on the implementation itself.
+      expect(await impl.threshold()).to.equal(0n);
+      expect(await impl.ownersCount()).to.equal(0n);
+
+      const block = await ethers.provider.getBlock("latest");
+      const expiry = BigInt(block!.timestamp) + HOUR;
+
+      await expect(
+        impl.execTransaction([s0.address], [0n], ["0x"], expiry, "0x"),
+      ).to.be.revertedWithCustomError(impl, "NotSetup");
+    });
+
+    it("#38 manually-deployed uninitialized clone execTransaction reverts with NotSetup", async () => {
+      const [s0] = await ethers.getSigners();
+      const F = await ethers.getContractFactory("GaoSafeFactory");
+      const factory = await F.deploy();
+      await factory.waitForDeployment();
+      const implAddr = await factory.implementation();
+
+      // Bypass the factory: deploy an EIP-1167 minimal proxy directly
+      // pointing at the implementation, without calling setup(). This
+      // is the second NotSetup case the guard exists to defend.
+      // Standard EIP-1167 creation bytecode = 10-byte deploy prologue
+      // (`3d602d80600a3d3981f3`) followed by the 45-byte runtime
+      // template (`363d3d373d3d3d363d73<impl>5af43d82803e903d91602b57fd5bf3`).
+      const creationCode =
+        "0x3d602d80600a3d3981f3" +
+        "363d3d373d3d3d363d73" +
+        implAddr.slice(2).toLowerCase() +
+        "5af43d82803e903d91602b57fd5bf3";
+      const tx = await s0.sendTransaction({ data: creationCode });
+      const receipt = await tx.wait();
+      const uninitAddr = receipt!.contractAddress!;
+      expect(uninitAddr).to.not.equal(ethers.ZeroAddress);
+
+      const uninit = await ethers.getContractAt("GaoSafe", uninitAddr);
+      // Confirm it's truly uninitialised: no setup() was called.
+      expect(await uninit.threshold()).to.equal(0n);
+      expect(await uninit.ownersCount()).to.equal(0n);
+
+      const block = await ethers.provider.getBlock("latest");
+      const expiry = BigInt(block!.timestamp) + HOUR;
+
+      await expect(
+        uninit.execTransaction([s0.address], [0n], ["0x"], expiry, "0x"),
+      ).to.be.revertedWithCustomError(uninit, "NotSetup");
+    });
+
+    it("#39 sending ETH directly to the bare implementation reverts (ImplementationCannotReceiveEth); clone receive still works (cross-ref #36)", async () => {
+      const [s0] = await ethers.getSigners();
+      const F = await ethers.getContractFactory("GaoSafeFactory");
+      const factory = await F.deploy();
+      await factory.waitForDeployment();
+      const implAddr = await factory.implementation();
+      const impl = await ethers.getContractAt("GaoSafe", implAddr);
+
+      const balanceBefore = await ethers.provider.getBalance(implAddr);
+
+      await expect(
+        s0.sendTransaction({ to: implAddr, value: 1n }),
+      ).to.be.revertedWithCustomError(impl, "ImplementationCannotReceiveEth");
+
+      // Sanity: the implementation's balance is unchanged.
+      expect(await ethers.provider.getBalance(implAddr)).to.equal(balanceBefore);
+
+      // And: a fresh clone created via the factory still accepts ETH
+      // (#36 covers the same path; we include a focused assertion
+      // here so the two halves of fix 2 are pinned in the same case).
+      const tx = await factory.createVault(
+        [s0.address],
+        1,
+        ethers.id("hardening-39"),
+      );
+      const r = await tx.wait();
+      let cloneAddr = "";
+      for (const log of r!.logs) {
+        try {
+          const p = factory.interface.parseLog(log);
+          if (p && p.name === "VaultCreated") cloneAddr = p.args[0] as string;
+        } catch {
+          /* skip */
+        }
+      }
+      expect(cloneAddr).to.not.equal("");
+      const before = await ethers.provider.getBalance(cloneAddr);
+      await s0.sendTransaction({ to: cloneAddr, value: 12345n });
+      expect((await ethers.provider.getBalance(cloneAddr)) - before).to.equal(
+        12345n,
+      );
+    });
+  });
 });

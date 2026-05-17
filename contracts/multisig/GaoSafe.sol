@@ -120,6 +120,23 @@ contract GaoSafe {
     error ExecutionFailed(uint256 callIndex, bytes reason);
     error LastOwnerCannotBeRemoved();
     error OwnerNotFound();
+    error NotSetup();
+    error ImplementationCannotReceiveEth();
+
+    // ── Implementation self-pin (clone-aware ETH ingress guard) ──────────
+    //
+    // `_IMPLEMENTATION_SELF` is assigned in the constructor to the
+    // address of the GaoSafe singleton itself. Because `immutable`
+    // values live in the contract's RUNTIME BYTECODE rather than in
+    // storage, every EIP-1167 clone reads the same baked-in value when
+    // it delegate-calls into the singleton — so this constant identifies
+    // "the bare implementation" from inside any clone's execution
+    // context. Compared to `address(this)` (which a delegatecall
+    // resolves to the clone's address), `_IMPLEMENTATION_SELF` is the
+    // singleton's address even when read through a clone. `receive()`
+    // uses the difference to refuse direct ETH transfers to the bare
+    // singleton — see the `receive()` block at the bottom of this file.
+    address private immutable _IMPLEMENTATION_SELF;
 
     // ── Constructor (singleton lock) ─────────────────────────────────────
 
@@ -130,8 +147,16 @@ contract GaoSafe {
     ///         starts with default (zero-initialised) storage and
     ///         `_initialized = false`, exactly as required for one-shot
     ///         init on the clone.
+    ///
+    ///         The constructor also bakes the implementation singleton's
+    ///         own address into the immutable `_IMPLEMENTATION_SELF`
+    ///         pin. Because `immutable` lives in bytecode, every clone
+    ///         reads the same value through delegatecall — used by
+    ///         `receive()` to refuse direct ETH ingress to the bare
+    ///         singleton.
     constructor() {
         _initialized = true;
+        _IMPLEMENTATION_SELF = address(this);
     }
 
     // ── Setup (one-time per clone) ───────────────────────────────────────
@@ -192,8 +217,11 @@ contract GaoSafe {
     /// @dev Build the EIP-712 typed-data digest from a struct hash.
     ///      Intentionally named `_hashTypedData` (not `_hashTypedDataV4`)
     ///      so the absence of OZ inheritance is visible at the call site.
+    ///      The `hex"1901"` prefix is the canonical EIP-712 two-byte
+    ///      sentinel (0x19, 0x01) that distinguishes typed-data digests
+    ///      from EIP-191 personal-sign and other prefixed-message forms.
     function _hashTypedData(bytes32 structHash) internal view returns (bytes32) {
-        return keccak256(abi.encodePacked(hex"19_01", domainSeparator(), structHash));
+        return keccak256(abi.encodePacked(hex"1901", domainSeparator(), structHash));
     }
 
     /// @notice Compute the EIP-712 digest that signers must sign over.
@@ -256,6 +284,29 @@ contract GaoSafe {
         uint256 expiry,
         bytes calldata signatures
     ) external {
+        // ── Defense-in-depth NotSetup guard ────────────────────────────
+        //
+        // Refuse before any other check. Two distinct scenarios this
+        // catches:
+        //
+        //   (a) The bare implementation singleton. Its constructor
+        //       sets `_initialized = true`, but `threshold == 0` and
+        //       `_owners.length == 0`. Without this guard, a caller
+        //       could pass a zero-length signature bundle (which would
+        //       satisfy `signatures.length == 65 * 0`) and trigger the
+        //       inner-call loop on the implementation itself.
+        //
+        //   (b) A manually-deployed EIP-1167 clone that bypassed the
+        //       factory and never had `setup()` called. Such a clone
+        //       has `_initialized == false`, `threshold == 0`,
+        //       `_owners.length == 0` — same hole as (a) for the same
+        //       reason.
+        //
+        // Either form is rejected up front so neither can drain ETH
+        // through a zero-threshold short-circuit. Pinned by tests #37
+        // and #38 in GaoSafe.test.ts.
+        if (!_initialized || threshold == 0 || _owners.length == 0) revert NotSetup();
+
         // ── Length parity ─────────────────────────────────────────────
         uint256 n = targets.length;
         if (n == 0) revert InvalidLengths();
@@ -411,9 +462,20 @@ contract GaoSafe {
 
     // ── Funds intake ─────────────────────────────────────────────────────
 
-    /// @notice Accept plain ETH transfers. No fallback function — calldata
-    ///         to non-existent function selectors reverts. ETH sent to
-    ///         the bare implementation singleton (not a clone) is
-    ///         permanently locked; clones receive into their own balance.
-    receive() external payable {}
+    /// @notice Accept plain ETH transfers into a setup-initialised clone.
+    ///         No fallback function — calldata to non-existent function
+    ///         selectors reverts. ETH sent directly to the bare
+    ///         implementation singleton (not a clone) is refused with
+    ///         `ImplementationCannotReceiveEth`. The clone-aware check
+    ///         reads the bytecode-embedded `_IMPLEMENTATION_SELF` pin,
+    ///         which is the singleton's address even when this `receive`
+    ///         is reached through a clone's delegatecall — so a clone
+    ///         compares `address(this)` (the clone) against the
+    ///         singleton and accepts the transfer, while a direct
+    ///         transfer to the singleton compares equal and reverts.
+    ///         Pinned by test #39 (revert path) and test #36 (clone
+    ///         ETH ingress remains accepted).
+    receive() external payable {
+        if (address(this) == _IMPLEMENTATION_SELF) revert ImplementationCannotReceiveEth();
+    }
 }
