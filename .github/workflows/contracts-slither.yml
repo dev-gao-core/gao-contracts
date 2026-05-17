@@ -1,0 +1,99 @@
+# Advisory Slither static-analysis CI for gao-contracts.
+#
+# This workflow is INTENTIONALLY ADVISORY — every Slither-related step
+# uses `continue-on-error: true` so a Slither install / parse / detector
+# failure CANNOT block a PR merge. The required compile + test gate is
+# `.github/workflows/contracts-ci.yml` (unchanged by this PR). This
+# workflow's output is a downloadable JSON artifact only; it never
+# writes into the repo working tree.
+#
+# Operator note (mirrored in docs/multisig/gao-safe-static-analysis.md):
+#   The `contracts-slither / slither (advisory)` status check MUST NOT
+#   be added to GitHub branch-protection "Require status checks to pass
+#   before merging" while this workflow is advisory. Escalation to a
+#   required gate is a separate operator decision and lands in its own
+#   reviewable PR with a documented zero-finding baseline observed
+#   across multiple prior PRs.
+#
+# Hardening posture (matches contracts-ci.yml):
+#   * permissions: contents: read — no checks: write, no pull-request: write.
+#   * No secrets consumed. No `secrets.*` reference appears.
+#   * No deploy, no verify, no --network flag, no broadcast.
+#   * Slither installed via pip at a pinned version (0.10.4); the pin
+#     locks the advisory baseline against silent detector additions.
+
+name: contracts-slither
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contracts-slither-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  slither:
+    name: slither (advisory)
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Required-within-job steps: setup + compile ────────────────────
+      # These steps must succeed for Slither to read compiled metadata.
+      # They are NOT continue-on-error because their failure indicates a
+      # repo-level problem (broken lockfile, broken Solidity) that is
+      # already surfaced by contracts-ci.yml — re-failing here would be
+      # noise.
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install npm dependencies (npm ci — strict lockfile)
+        run: npm ci
+
+      - name: Compile contracts (Slither reads compiled metadata)
+        run: npx hardhat compile
+
+      # ── ADVISORY steps: failures do NOT block the workflow ────────────
+
+      - name: Install Slither (pinned 0.10.4)
+        continue-on-error: true
+        run: pip install --user "slither-analyzer==0.10.4"
+
+      - name: Run Slither (advisory)
+        continue-on-error: true
+        # Write JSON to RUNNER_TEMP so the repo working tree is never
+        # touched. The upload step below captures the artifact for
+        # reviewer download regardless of whether Slither reported
+        # findings (exit code != 0) or ran cleanly (exit code 0).
+        run: |
+          slither . \
+            --config-file slither.config.json \
+            --json "$RUNNER_TEMP/slither-report.json"
+
+      - name: Upload Slither JSON artifact
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: slither-report
+          path: ${{ runner.temp }}/slither-report.json
+          if-no-files-found: ignore
+          retention-days: 90
