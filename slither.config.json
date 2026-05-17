@@ -1,0 +1,10 @@
+{
+  "_comment_1": "Slither configuration for gao-contracts. Consumed by the advisory workflow at .github/workflows/contracts-slither.yml.",
+  "_comment_2": "filter_paths scopes analysis to the multisig directory under contracts/. The contracts/test/ Solidity-only mocks (e.g. MockERC20) and any non-multisig source are filtered out via the same regex.",
+  "_comment_3": "exclude_dependencies skips OpenZeppelin vendored code. OZ is pinned at v5.0.2 by package.json and reviewed independently; its detectors land in OZ's own audit track, not ours.",
+  "_comment_4": "detectors_to_exclude: naming-convention (Solidity naming follows project convention documented in CLAUDE.md and gao-safe-design.md); solc-version (Solidity 0.8.24 is intentionally pinned by hardhat.config.ts and the audit-target manifest).",
+  "_comment_5": "Output target is documented in docs/multisig/gao-safe-static-analysis.md: workflow writes JSON to $RUNNER_TEMP/slither-report.json and uploads as a GitHub Actions artifact. Never committed.",
+  "filter_paths": "node_modules|contracts/(?!multisig/)|contracts/test/",
+  "exclude_dependencies": true,
+  "detectors_to_exclude": "naming-convention,solc-version"
+}
