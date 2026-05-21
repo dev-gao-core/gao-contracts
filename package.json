@@ -8,6 +8,9 @@
     "test": "hardhat test",
     "node": "hardhat node",
     "deploy-anchor:base-sepolia": "hardhat run scripts/deployGaoDomainAnchor.ts --network baseSepolia",
+    "deploy-multisig-factory:base-sepolia": "hardhat run scripts/multisig/deployGaoSafeFactory.devtest.ts --network baseSepolia",
+    "smoke-multisig:ephemeral": "hardhat run scripts/multisig/smokeGaoSafe.devtest.ts",
+    "smoke-multisig:base-sepolia": "hardhat run scripts/multisig/smokeGaoSafe.devtest.ts --network baseSepolia",
     "verify:base-sepolia": "hardhat verify --network baseSepolia",
     "verify:base": "hardhat verify --network base",
     "clean": "hardhat clean"
