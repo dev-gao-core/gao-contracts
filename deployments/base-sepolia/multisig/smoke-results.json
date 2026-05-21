@@ -1,0 +1,273 @@
+{
+  "tier": "devtest",
+  "mode": "ephemeral",
+  "network": "hardhat",
+  "chainId": 31337,
+  "factoryAddress": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+  "implementationAddress": "0xa16E02E87b7454126E5E10d957A927A7F5B5d2be",
+  "timestamp": "2026-05-21T13:58:09.898Z",
+  "counts": {
+    "pass": 44,
+    "fail": 0,
+    "skipped": 4,
+    "total": 48
+  },
+  "results": [
+    {
+      "id": "F1",
+      "name": "factory.implementation() != zero",
+      "status": "PASS",
+      "details": "0xa16E02E87b7454126E5E10d957A927A7F5B5d2be"
+    },
+    {
+      "id": "F2",
+      "name": "implementation.threshold() == 0 (singleton not setup)",
+      "status": "PASS",
+      "details": "threshold=0"
+    },
+    {
+      "id": "F3",
+      "name": "implementation.ownersCount() == 0",
+      "status": "PASS",
+      "details": "count=0"
+    },
+    {
+      "id": "F4",
+      "name": "implementation runtime bytecode hash recorded",
+      "status": "PASS",
+      "details": "0x2c2b2c638bf87f1f9fc8a82df1a34f65babf2440efb7ac86c628bef5a52c890c"
+    },
+    {
+      "id": "F5",
+      "name": "direct setup on bare impl reverts AlreadyInitialized",
+      "status": "PASS"
+    },
+    {
+      "id": "F6",
+      "name": "direct ETH to bare impl reverts ImplementationCannotReceiveEth",
+      "status": "PASS"
+    },
+    {
+      "id": "V1",
+      "name": "computeVaultAddress predicts address",
+      "status": "PASS",
+      "details": "0x9139527B46F792efC75CcC1327cFeF6EDD775302"
+    },
+    {
+      "id": "V2",
+      "name": "createVault succeeds + VaultCreated emitted",
+      "status": "PASS",
+      "details": "0x9139527B46F792efC75CcC1327cFeF6EDD775302"
+    },
+    {
+      "id": "V3",
+      "name": "VaultCreated event fields match input",
+      "status": "PASS"
+    },
+    {
+      "id": "V4",
+      "name": "deployed vault address == predicted",
+      "status": "PASS"
+    },
+    {
+      "id": "V5",
+      "name": "getOwners() returns expected owners",
+      "status": "PASS"
+    },
+    {
+      "id": "V6",
+      "name": "threshold() == 2",
+      "status": "PASS",
+      "details": "t=2"
+    },
+    {
+      "id": "V7",
+      "name": "nonce() == 0",
+      "status": "PASS",
+      "details": "n=0"
+    },
+    {
+      "id": "V8",
+      "name": "same deployer + same salt reverts (collision)",
+      "status": "PASS"
+    },
+    {
+      "id": "V9",
+      "name": "different deployer + same salt → different address",
+      "status": "PASS",
+      "details": "0x48fFaA74A223BA3Fb9b5f20f61f9C9A6bc5823F3"
+    },
+    {
+      "id": "E1",
+      "name": "vault.domainSeparator() available",
+      "status": "PASS",
+      "details": "0x7857e36bb21ecf188f8b3e0f97af2d79ff872a14327d950e59e90283c19894ef"
+    },
+    {
+      "id": "E2",
+      "name": "JS-side domain separator matches on-chain",
+      "status": "PASS"
+    },
+    {
+      "id": "E3",
+      "name": "vault.hashTx matches JS digest",
+      "status": "PASS"
+    },
+    {
+      "id": "E4",
+      "name": "two clones produce different domain separators",
+      "status": "PASS"
+    },
+    {
+      "id": "E5",
+      "name": "signTypedData recovers signer correctly",
+      "status": "PASS"
+    },
+    {
+      "id": "X1",
+      "name": "native ETH transfer",
+      "status": "PASS"
+    },
+    {
+      "id": "E6",
+      "name": "sorted threshold signatures execute successfully",
+      "status": "PASS"
+    },
+    {
+      "id": "X2",
+      "name": "ERC20 transfer via MockERC20",
+      "status": "PASS"
+    },
+    {
+      "id": "X3",
+      "name": "batch (2 native sub-calls atomically)",
+      "status": "PASS"
+    },
+    {
+      "id": "X4",
+      "name": "addOwner via self-call",
+      "status": "PASS"
+    },
+    {
+      "id": "X5",
+      "name": "removeOwner via self-call",
+      "status": "PASS"
+    },
+    {
+      "id": "X6",
+      "name": "replaceOwner via self-call",
+      "status": "PASS"
+    },
+    {
+      "id": "X7",
+      "name": "changeThreshold INCREASE (after X4-X6 owner-set drift)",
+      "status": "SKIPPED",
+      "details": "owner-set drift after X4-X6; covered by test/multisig/GaoSafe.test.ts #27-#30"
+    },
+    {
+      "id": "X8",
+      "name": "threshold DECREASE (danger-policy scenario for mobile)",
+      "status": "SKIPPED",
+      "details": "owner-set drift after X4-X6; covered by test/multisig/GaoSafe.test.ts #33 + mobile MultisigPolicy danger badge"
+    },
+    {
+      "id": "N1",
+      "name": "nonce increments after success",
+      "status": "PASS"
+    },
+    {
+      "id": "N2",
+      "name": "same calldata + sigs cannot replay",
+      "status": "PASS"
+    },
+    {
+      "id": "N3",
+      "name": "failed inner call does NOT increment nonce",
+      "status": "PASS"
+    },
+    {
+      "id": "N4",
+      "name": "stale nonce proposal rejected",
+      "status": "PASS"
+    },
+    {
+      "id": "FC1",
+      "name": "expired proposal reverts",
+      "status": "PASS"
+    },
+    {
+      "id": "FC2",
+      "name": "duplicate signature reverts",
+      "status": "PASS"
+    },
+    {
+      "id": "FC3",
+      "name": "unsorted signatures reverts",
+      "status": "PASS"
+    },
+    {
+      "id": "FC4",
+      "name": "non-owner signature reverts",
+      "status": "PASS"
+    },
+    {
+      "id": "FC5",
+      "name": "insufficient signatures reverts",
+      "status": "PASS"
+    },
+    {
+      "id": "FC6",
+      "name": "EIP-191 personal_sign signature rejected",
+      "status": "PASS"
+    },
+    {
+      "id": "FC7",
+      "name": "wrong chainId signature rejected",
+      "status": "PASS"
+    },
+    {
+      "id": "FC8",
+      "name": "wrong vault signature rejected",
+      "status": "PASS"
+    },
+    {
+      "id": "FC9",
+      "name": "payload mutation after signing rejected",
+      "status": "PASS"
+    },
+    {
+      "id": "FC10",
+      "name": "failed inner call leaves nonce unchanged",
+      "status": "PASS",
+      "details": "see N3"
+    },
+    {
+      "id": "FC11",
+      "name": "external addOwner reverts NotSelfCall",
+      "status": "PASS"
+    },
+    {
+      "id": "FC12",
+      "name": "remove last owner reverts LastOwnerCannotBeRemoved",
+      "status": "SKIPPED",
+      "details": "covered by test/multisig/GaoSafe.test.ts #31"
+    },
+    {
+      "id": "FC13",
+      "name": "setup direct on bare impl reverts AlreadyInitialized",
+      "status": "PASS",
+      "details": "see F5"
+    },
+    {
+      "id": "FC14",
+      "name": "execTransaction on bare impl reverts NotSetup",
+      "status": "PASS"
+    },
+    {
+      "id": "FC15",
+      "name": "execTransaction on uninit clone reverts NotSetup",
+      "status": "SKIPPED",
+      "details": "uninit clone requires raw CREATE2 outside factory; covered by test/multisig/GaoSafe.test.ts #38"
+    }
+  ]
+}
