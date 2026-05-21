@@ -258,7 +258,7 @@ Backing: [gao-safe-design.md](./gao-safe-design.md) §9 (Recovery model).
 
 ### Q9.1 — "How is the ABI kept in sync with mobile?"
 
-Mobile pins the ABI by **commit SHA AND by SHA-256 of the ABI JSON**. The commit pin is human-traceable provenance; the SHA-256 pin is the byte-identical check. The current pin is `gao-contracts@ac14411`; the audit-target commit (`bf48bdf`) does NOT change either ABI file, so the SHA-256 hashes still match.
+Mobile pins the ABI by **commit SHA AND by SHA-256 of the ABI JSON**. The commit pin is human-traceable provenance; the SHA-256 pin is the byte-identical check. The current pin is `gao-contracts@ac14411` (PR #17); the audit-target commit (`22c6bce`, tag `audit-target-MS-P2`) does NOT change either ABI file — PR #18 added CI infra, PR #19 added property tests + advisory Slither, PR #20 + #21 are docs-only — so the SHA-256 hashes still match.
 
 When a future audited release changes the ABI, the bump procedure documented in [mobile-abi-compatibility.md](./mobile-abi-compatibility.md) §9 ensures the mobile pin is updated in lockstep.
 

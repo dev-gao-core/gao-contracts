@@ -21,7 +21,11 @@ This document complements (does not replace):
 | Sponsor | dev-gao-core (operator) |
 | Repository | [`dev-gao-core/gao-contracts`](https://github.com/dev-gao-core/gao-contracts) |
 | Audit target branch | `main` |
-| Audit target commit (this handoff) | `bf48bdf0e441eee4631d8b889631e6781ff0f6ea` |
+| Audit target commit (this handoff) | `22c6bce9b5552685139315eaa90e7230cfdc016a` |
+| Audit target tag | `audit-target-MS-P2` (annotated, immovable for the audit window) |
+| Audit-prep PR | [#20](https://github.com/dev-gao-core/gao-contracts/pull/20) — prepared the audit package (commit `bf48bdf`). |
+| Handoff PR | [#21](https://github.com/dev-gao-core/gao-contracts/pull/21) — added external auditor handoff docs (this set). Merge of PR #21 IS the audit target. |
+| Solidity / ABI status | Byte-identical to PR #17 (`ac14411`). PR #18 added CI infra; PR #19 added property tests + advisory Slither; PR #20 + #21 are docs-only. No in-scope Solidity or ABI change since PR #17. |
 | In-scope Solidity files | [`contracts/multisig/GaoSafe.sol`](../../contracts/multisig/GaoSafe.sol) + [`contracts/multisig/GaoSafeFactory.sol`](../../contracts/multisig/GaoSafeFactory.sol) |
 | Total LOC in scope (Solidity, excl. comments/whitespace) | ~280 statement lines across two files |
 | Compiler | solc 0.8.24, optimizer `runs: 200`, metadata `bytecodeHash: ipfs` |
@@ -37,8 +41,9 @@ This document complements (does not replace):
 
 | Item | Value |
 |---|---|
-| Audit target commit SHA | `bf48bdf0e441eee4631d8b889631e6781ff0f6ea` |
-| Audit target tree URL | https://github.com/dev-gao-core/gao-contracts/tree/bf48bdf0e441eee4631d8b889631e6781ff0f6ea |
+| Audit target commit SHA | `22c6bce9b5552685139315eaa90e7230cfdc016a` |
+| Audit target tree URL | https://github.com/dev-gao-core/gao-contracts/tree/22c6bce9b5552685139315eaa90e7230cfdc016a |
+| Audit target tag | `audit-target-MS-P2` |
 | ABI SHA-256 (`abis/multisig/GaoSafe.json`) | `ee21f7af040b2e579c7e8c2985d2e16cf51b6b84cdbd72116eda994ca13549d1` |
 | ABI SHA-256 (`abis/multisig/GaoSafeFactory.json`) | `1af102026245f187025bc716fce033f25967fc8b8b2f6fc99886573240d8a90f` |
 | Mobile-side pinned commit | `gao-contracts@ac14411` (PR #17) — ABI byte-equal to audit-target commit |
@@ -48,7 +53,7 @@ Reproduce the audit-target tree locally:
 ```bash
 git clone https://github.com/dev-gao-core/gao-contracts.git
 cd gao-contracts
-git checkout bf48bdf0e441eee4631d8b889631e6781ff0f6ea
+git checkout 22c6bce9b5552685139315eaa90e7230cfdc016a   # or: git checkout audit-target-MS-P2
 npm ci
 npx hardhat compile
 shasum -a 256 abis/multisig/GaoSafe.json abis/multisig/GaoSafeFactory.json
@@ -178,7 +183,7 @@ The handoff package is a single email / shared-drive folder that contains:
 | Artifact | Form |
 |---|---|
 | 1. This document | URL to `external-audit-handoff.md` on `gao-contracts/main` at the audit-target commit |
-| 2. Audit-target commit SHA | `bf48bdf0e441eee4631d8b889631e6781ff0f6ea` written explicitly in the handoff email |
+| 2. Audit-target commit SHA | `22c6bce9b5552685139315eaa90e7230cfdc016a` (tag `audit-target-MS-P2`) written explicitly in the handoff email |
 | 3. Public repo URL | `https://github.com/dev-gao-core/gao-contracts` |
 | 4. Engagement letter | Operator-side document; lives in the operator's contract management system |
 | 5. Audit-scope statement | URL to `audit-scope-statement.md` |
