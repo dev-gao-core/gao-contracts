@@ -22,8 +22,12 @@ This document is the formal scope statement for the GaoSafe Genesis external sma
 |---|---|
 | Repository | `dev-gao-core/gao-contracts` (GitHub) |
 | Audit target branch | `main` |
-| Audit target commit SHA | `bf48bdf0e441eee4631d8b889631e6781ff0f6ea` |
-| Audit target tree URL | https://github.com/dev-gao-core/gao-contracts/tree/bf48bdf0e441eee4631d8b889631e6781ff0f6ea |
+| Audit target commit SHA | `22c6bce9b5552685139315eaa90e7230cfdc016a` |
+| Audit target tree URL | https://github.com/dev-gao-core/gao-contracts/tree/22c6bce9b5552685139315eaa90e7230cfdc016a |
+| Audit target tag | `audit-target-MS-P2` (annotated, immovable for the audit window) |
+| Audit-prep PR | [#20](https://github.com/dev-gao-core/gao-contracts/pull/20) — prepared the audit package (commit `bf48bdf`). |
+| Handoff PR | [#21](https://github.com/dev-gao-core/gao-contracts/pull/21) — added external auditor handoff docs. Merge of PR #21 IS the audit target. |
+| Solidity / ABI changes between PR #17 and audit target | None. PR #18 added CI infra; PR #19 added property tests + advisory Slither; PR #20 + #21 are docs-only. The in-scope Solidity files are byte-identical to PR #17 (`ac14411`). |
 | Solidity compiler | 0.8.24, optimizer enabled, runs 200, metadata `bytecodeHash: ipfs` |
 
 ---
@@ -141,7 +145,7 @@ The sponsor commits to:
 
 | # | Commitment |
 |---|---|
-| S1 | Hold the audit-target commit (`bf48bdf0e441eee4631d8b889631e6781ff0f6ea`) frozen on `main` for the duration of the audit window — no force-push, no rebase, no rewrite. See [pre-audit-freeze.md](./pre-audit-freeze.md). |
+| S1 | Hold the audit-target commit (`22c6bce9b5552685139315eaa90e7230cfdc016a`, tag `audit-target-MS-P2`) frozen on `main` for the duration of the audit window — no force-push, no rebase, no rewrite. See [pre-audit-freeze.md](./pre-audit-freeze.md). |
 | S2 | Triage all findings within the timeline agreed in the engagement letter. |
 | S3 | Submit remediation PRs per the rules in [external-audit-handoff.md](./external-audit-handoff.md) §6.2. |
 | S4 | NOT deploy GaoSafe / GaoSafeFactory to mainnet before audit closure. |

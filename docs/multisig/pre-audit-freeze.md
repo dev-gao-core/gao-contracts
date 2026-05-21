@@ -12,7 +12,10 @@ The audit window starts when the operator emails the handoff package to the audi
 
 | Item | Value |
 |---|---|
-| Audit-target commit SHA | `bf48bdf0e441eee4631d8b889631e6781ff0f6ea` |
+| Audit-target commit SHA | `22c6bce9b5552685139315eaa90e7230cfdc016a` |
+| Audit-target tag | `audit-target-MS-P2` (annotated; created post-PR-#21-merge) |
+| Audit-prep PR | [#20](https://github.com/dev-gao-core/gao-contracts/pull/20) — commit `bf48bdf` (audit package). |
+| Handoff PR | [#21](https://github.com/dev-gao-core/gao-contracts/pull/21) — merge commit `22c6bce` (external auditor handoff). This commit is the audit target because it includes both audit-prep and handoff docs. |
 | Audit-target branch | `main` |
 | Repository | `dev-gao-core/gao-contracts` |
 | Frozen for the duration | The audit window |
