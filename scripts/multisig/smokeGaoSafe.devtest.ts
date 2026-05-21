@@ -103,6 +103,75 @@ async function expectRevert(
   }
 }
 
+// ── Live-mode robustness helpers (MS-P3.2.1) ─────────────────────────────
+//
+// Background: a previous live smoke against Base Sepolia surfaced TWO
+// independent harness issues:
+//
+//   1. Hardcoded salts. The smoke matrix used four fixed bytes32 salts
+//      (`"ab".repeat(32)`, `"cd".repeat(32)`, `"ef".repeat(32)`,
+//      `"11".repeat(32)`). On a clean ephemeral chain those collide
+//      with nothing, but a SECOND live-mode run against the SAME
+//      factory re-uses the same `(deployer, salt)` pair —
+//      `Clones.cloneDeterministic` reverts on address collision and V2
+//      fails with `execution reverted`. `genSalt(label)` below
+//      produces a fresh bytes32 per run by hashing
+//      `(label, timestamp, random)`. Ephemeral runs stay green because
+//      the chain itself is fresh; live runs stay green because each
+//      run picks a brand-new salt.
+//
+//   2. RPC tip-lag on post-createVault view reads. On Base Sepolia,
+//      `eth_call` to a freshly-deployed clone can return empty data
+//      (`BAD_DATA value="0x"`) for several seconds while the RPC node
+//      catches up. Mirrors the pattern absorbed by
+//      `scripts/deployGaoDomainDepositV3.devtest.ts:retryView(...)`.
+//      `retryView<T>` below retries 5 times with linear backoff before
+//      surfacing the failure.
+//
+// Both helpers are intentionally narrow:
+//   - `genSalt(label)` returns ONLY salts. Nothing else uses them.
+//   - `retryView<T>` wraps ONLY view calls. State-changing transactions
+//     still surface real reverts immediately — we never silently retry
+//     a failed write.
+
+/** Build a unique bytes32 salt per call. Label is included for human
+ *  readability in any future debug log; uniqueness comes from
+ *  `Date.now() + Wallet.createRandom().address`. The output is purely
+ *  off-chain-derived — no signer or chain interaction. */
+function genSalt(label: string): `0x${string}` {
+  const stamp = Date.now().toString(16).padStart(16, "0");
+  const rand = Wallet.createRandom().address.slice(2).toLowerCase();
+  // keccak256 over a label-tagged blob → always 32 bytes, always unique.
+  return keccak256(
+    "0x" + Buffer.from(label, "utf8").toString("hex") + stamp + rand,
+  ) as `0x${string}`;
+}
+
+/** Retry a view-style call up to `attempts` times with linear backoff.
+ *  Mirrors `scripts/deployGaoDomainDepositV3.devtest.ts` pattern.
+ *  Used ONLY for view reads (no state-changing tx) so we never mask
+ *  a real revert from a write call. */
+async function retryView<T>(
+  label: string,
+  fn: () => Promise<T>,
+  attempts = 5,
+  delayMs = 1500,
+): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+      if (i === attempts - 1) break;
+      await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+    }
+  }
+  throw new Error(
+    `${label} failed after ${attempts} retries: ${(last as Error)?.message ?? last}`,
+  );
+}
+
 async function main(): Promise<void> {
   console.log("─".repeat(72));
   console.log("Smoke GaoSafe + GaoSafeFactory (DEV/TEST) — MS-P3.1");
@@ -219,7 +288,9 @@ async function main(): Promise<void> {
   owners.forEach((o, i) => console.log(`  [${i}] ${o.address}`));
 
   const threshold = 2;
-  const clientSalt = ("0x" + "ab".repeat(32)) as `0x${string}`;
+  // MS-P3.2.1: salt is unique per run so live re-runs against the same
+  // factory do not collide on `Clones.cloneDeterministic`.
+  const clientSalt = genSalt("V1-clientSalt");
 
   // ── F1-F6 Factory checks ────────────────────────────────────────────
   console.log("─".repeat(72));
@@ -393,8 +464,14 @@ async function main(): Promise<void> {
 
   const vault = new ethers.Contract(vaultAddr, safeArt.abi, deployer);
 
+  // MS-P3.2.1: wrap post-createVault view reads with retryView to absorb
+  // RPC tip-lag — a Base Sepolia provider can serve `0x` for a few
+  // seconds before its read-state catches up with the new clone's code.
   try {
-    const onChainOwners = (await vault.getOwners()) as string[];
+    const onChainOwners = (await retryView(
+      "V5:getOwners",
+      () => vault.getOwners() as Promise<string[]>,
+    ));
     const ok =
       onChainOwners.length === ownerAddrs.length &&
       onChainOwners.every((o, i) => o.toLowerCase() === ownerAddrs[i].toLowerCase());
@@ -403,13 +480,19 @@ async function main(): Promise<void> {
     record("V5", "getOwners()", "FAIL", String(e));
   }
   try {
-    const t = (await vault.threshold()) as bigint;
+    const t = (await retryView(
+      "V6:threshold",
+      () => vault.threshold() as Promise<bigint>,
+    ));
     record("V6", "threshold() == 2", t === 2n ? "PASS" : "FAIL", `t=${t}`);
   } catch (e) {
     record("V6", "threshold()", "FAIL", String(e));
   }
   try {
-    const n = (await vault.nonce()) as bigint;
+    const n = (await retryView(
+      "V7:nonce",
+      () => vault.nonce() as Promise<bigint>,
+    ));
     record("V7", "nonce() == 0", n === 0n ? "PASS" : "FAIL", `n=${n}`);
   } catch (e) {
     record("V7", "nonce()", "FAIL", String(e));
@@ -447,7 +530,10 @@ async function main(): Promise<void> {
 
   let onChainDomainSep: string;
   try {
-    onChainDomainSep = (await vault.domainSeparator()) as string;
+    onChainDomainSep = (await retryView(
+      "E1:domainSeparator",
+      () => vault.domainSeparator() as Promise<string>,
+    ));
     record("E1", "vault.domainSeparator() available", "PASS", onChainDomainSep);
   } catch (e) {
     record("E1", "vault.domainSeparator()", "FAIL", String(e));
@@ -471,13 +557,17 @@ async function main(): Promise<void> {
 
   let onChainDigest: string;
   try {
-    onChainDigest = (await vault.hashTx(
-      sampleTargets,
-      sampleValues,
-      sampleData,
-      sampleExpiry,
-      sampleNonce,
-    )) as string;
+    onChainDigest = (await retryView(
+      "E3:hashTx",
+      () =>
+        vault.hashTx(
+          sampleTargets,
+          sampleValues,
+          sampleData,
+          sampleExpiry,
+          sampleNonce,
+        ) as Promise<string>,
+    ));
     const jsDigest = buildDigest({
       chainId: BigInt(chainId),
       vault: vaultAddr,
@@ -499,7 +589,7 @@ async function main(): Promise<void> {
 
   // E4 — clone-safe domain separator (deploy a second vault, compare)
   {
-    const secondSalt = ("0x" + "cd".repeat(32)) as `0x${string}`;
+    const secondSalt = genSalt("E4-secondSalt");
     const secondTx = (await factory.createVault(
       ownerAddrs,
       threshold,
@@ -515,7 +605,10 @@ async function main(): Promise<void> {
     });
     const secondVaultAddr = factory.interface.parseLog(secondLog!)?.args.vault as string;
     const secondVault = new ethers.Contract(secondVaultAddr, safeArt.abi, deployer);
-    const secondDomain = (await secondVault.domainSeparator()) as string;
+    const secondDomain = (await retryView(
+      "E4:secondDomainSeparator",
+      () => secondVault.domainSeparator() as Promise<string>,
+    ));
     record(
       "E4",
       "two clones produce different domain separators",
@@ -738,7 +831,10 @@ async function main(): Promise<void> {
         data: [callData],
       });
       if (out.ok) {
-        const onChainOwners = (await vault.getOwners()) as string[];
+        const onChainOwners = (await retryView(
+          "X4:getOwners",
+          () => vault.getOwners() as Promise<string[]>,
+        ));
         const added = onChainOwners.some(
           (o) => o.toLowerCase() === newOwner.toLowerCase(),
         );
@@ -769,7 +865,10 @@ async function main(): Promise<void> {
         data: [callData],
       });
       if (out.ok) {
-        const onChainOwners = (await vault.getOwners()) as string[];
+        const onChainOwners = (await retryView(
+          "X5:getOwners",
+          () => vault.getOwners() as Promise<string[]>,
+        ));
         const removed = !onChainOwners.some(
           (o) => o.toLowerCase() === targetToRemove.toLowerCase(),
         );
@@ -803,7 +902,10 @@ async function main(): Promise<void> {
           data: [callData],
         });
         if (out.ok) {
-          const onChainOwners = (await vault.getOwners()) as string[];
+          const onChainOwners = (await retryView(
+            "X6:getOwners",
+            () => vault.getOwners() as Promise<string[]>,
+          ));
           const hasNew = onChainOwners.some(
             (o) => o.toLowerCase() === replacement.toLowerCase(),
           );
@@ -856,7 +958,7 @@ async function main(): Promise<void> {
     const oC = Wallet.createRandom().connect(provider);
     nonceOwners = sortSignersAscending([oA, oB, oC]);
     const sortedAddrs = nonceOwners.map((o) => o.address);
-    const nonceSalt = ("0x" + "ef".repeat(32)) as `0x${string}`;
+    const nonceSalt = genSalt("N1N4-nonceSalt");
     const tx = (await factory.createVault(
       sortedAddrs,
       2,
@@ -1047,7 +1149,7 @@ async function main(): Promise<void> {
     const fC = Wallet.createRandom().connect(provider);
     const fOwnersSorted = sortSignersAscending([fA, fB, fC]);
     const fOwnerAddrs = fOwnersSorted.map((o) => o.address);
-    const fSalt = ("0x" + "11".repeat(32)) as `0x${string}`;
+    const fSalt = genSalt("FC-fSalt");
     const fTx = (await factory.createVault(
       fOwnerAddrs,
       2,
