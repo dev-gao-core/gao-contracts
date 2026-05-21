@@ -1,0 +1,27 @@
+{
+  "contract": "GaoSafeFactory",
+  "tier": "devtest",
+  "mode": "broadcast",
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "solcVersion": "0.8.24",
+  "optimizerRuns": 200,
+  "bytecodeHashSetting": "ipfs",
+  "ozContractsVersion": "5.6.1",
+  "factoryAddress": "0xFC02d215c9330aC9972363054c0A5F62FF2786EF",
+  "implementationAddress": "0x9099CBf37fC724F0bd380358F37c261FE4A015c8",
+  "factoryRuntimeBytecodeHash": "0x7d419e7dd5a8634cf09debc9b2fae87c9e32d2f1b7b0186b52560a12ee23cba5",
+  "implementationRuntimeBytecodeHash": "0x5edb2642a1afd547193d139e92fe7463bf5397d420ecd0682db612ca8ca02e27",
+  "factoryInitcodeHash": "0xd311e561d5e695a184d258145f6f0e03661db49915ee3cb7272dec3c143e8514",
+  "implementationInitcodeHash": "0xc44d809f2a1d1d5f5b67c6ddc564f76272224f0f5f8d303021c107274849f5df",
+  "deployerPublicAddress": "0xf7c9CCEAAE9Bf675213BA5f49C92c6D56Ca52bD5",
+  "deployTxHash": "0xaaab145daea4cc7d82addba61fa633ce38e78e2272b6bdb62a803dc70c431207",
+  "deployBlockNumber": 41803119,
+  "deployTimestamp": "2026-05-21T14:41:59.598Z",
+  "notes": [
+    "Dev/test deploy on Base Sepolia. NOT production.",
+    "Implementation singleton lock verified via direct setup() revert.",
+    "Selector pre-check passed for GaoSafe + GaoSafeFactory.",
+    "Run scripts/multisig/smokeGaoSafe.devtest.ts to execute the full smoke matrix against this deployment."
+  ]
+}
