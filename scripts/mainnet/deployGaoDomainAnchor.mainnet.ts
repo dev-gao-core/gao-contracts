@@ -74,7 +74,10 @@ interface DeploymentRecord {
   chainId: number;
   address: string;
   deployer: string;
-  deployTxHash: string | null;
+  // Matches the dev/test anchor artifact field name at
+  // `deployments/base-sepolia/GaoDomainAnchor.json` so downstream
+  // tooling can grep both records with a single key.
+  txHash: string | null;
   constructorArgs: Record<string, never>;
   deployedAt: string;
   sourceCommit: string | null;
@@ -195,7 +198,7 @@ async function main(): Promise<void> {
     chainId,
     address,
     deployer: deployerAddress,
-    deployTxHash: tx?.hash ?? null,
+    txHash: tx?.hash ?? null,
     constructorArgs: {},
     deployedAt: new Date().toISOString(),
     sourceCommit: readSourceCommit(),

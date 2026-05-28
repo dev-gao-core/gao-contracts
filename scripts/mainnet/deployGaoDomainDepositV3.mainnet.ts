@@ -144,10 +144,20 @@ function isAddress(s: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(s);
 }
 
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
 function checksumOrThrow(label: string, raw: string): string {
   const t = raw.trim();
   if (!isAddress(t)) throw new Error(`${label} is not a 40-hex EVM address`);
-  return ethers.getAddress(t);
+  const checksum = ethers.getAddress(t);
+  // The V3 contract constructor rejects address(0) for treasury, and
+  // OZ Ownable v5 rejects address(0) for the initial owner. We
+  // fail-close earlier in the script so the operator does not waste
+  // gas on a tx that would revert in the constructor.
+  if (checksum.toLowerCase() === ZERO_ADDRESS) {
+    throw new Error(`REFUSED: ${label} must not be the zero address`);
+  }
+  return checksum;
 }
 
 /** Best-effort current commit lookup. Returns null if `git` is not
