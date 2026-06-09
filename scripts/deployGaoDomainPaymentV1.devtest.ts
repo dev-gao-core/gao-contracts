@@ -220,44 +220,113 @@ async function main(): Promise<void> {
     throw new Error(`${label} failed after ${n} retries: ${(last as Error)?.message ?? last}`);
   }
 
+  // Read-after-write helper: a load-balanced RPC may serve a stale
+  // replica that still reports the pre-tx value right after a tx mined.
+  // Poll the read until `satisfied` holds or the bounded window is
+  // exhausted; a transient RPC error is treated like a stale read and
+  // keeps polling. Returns the last observed value — the caller decides
+  // whether a still-unsatisfied value is fatal (fail-closed).
+  async function readUntil<T>(
+    label: string,
+    fn: () => Promise<T>,
+    satisfied: (v: T) => boolean,
+    attempts = 10,
+    baseDelay = 2000,
+  ): Promise<T> {
+    let v: T = await fn();
+    for (let i = 0; i < attempts && !satisfied(v); i++) {
+      const wait = baseDelay + i * 500; // gentle linear backoff
+      console.log(`  ${label} not settled (attempt ${i + 1}/${attempts}); retrying in ${wait}ms…`);
+      await new Promise((r) => setTimeout(r, wait));
+      try {
+        v = await fn();
+      } catch {
+        // transient RPC / replica error — keep the last value and retry
+      }
+    }
+    return v;
+  }
+
   const onChainOwner: string = await retryView("owner()", () => payment.owner());
-  if (onChainOwner.toLowerCase() !== signerAddr.toLowerCase()) {
+  const deployerIsOwner = onChainOwner.toLowerCase() === signerAddr.toLowerCase();
+
+  let allowlistTxHash: string | null = null;
+  let allowlistBlock: number | null = null;
+  if (deployerIsOwner) {
+    console.log("Setting USDC on the allowlist…");
+    const tx1 = await payment.setAllowedToken(usdcAddr, true);
+    allowlistTxHash = tx1.hash;
+    console.log(`  setAllowedToken tx: ${tx1.hash}`);
+    const r1 = await tx1.wait();
+    if (!r1 || r1.status !== 1) {
+      throw new Error(
+        `setAllowedToken tx ${tx1.hash} did not succeed (status ${r1?.status ?? "null"}).`,
+      );
+    }
+    allowlistBlock = r1.blockNumber;
+  } else {
     console.warn(
       `Note: deployer ${signerAddr} != post-deploy owner ${onChainOwner}. ` +
         `setAllowedToken must come from the owner; skipping allowlist here. ` +
         `The owner Safe MUST execute setAllowedToken(USDC, true) as its first action.`,
     );
-  } else {
-    console.log("Setting USDC on the allowlist…");
-    const tx1 = await payment.setAllowedToken(usdcAddr, true);
-    console.log(`  setAllowedToken tx: ${tx1.hash}`);
-    await tx1.wait();
+  }
+
+  // Capture the deploy block for the evidence record (non-fatal if the
+  // receipt can't be re-fetched).
+  let deployBlock: number | null = null;
+  try {
+    const dr = await deployTx?.wait();
+    deployBlock = dr?.blockNumber ?? null;
+  } catch {
+    /* leave null — not part of the mandatory verification */
   }
 
   console.log("");
   console.log("Verifying on-chain state…");
-  const [owner, treasury, allowed, paused] = await Promise.all([
-    retryView("owner()",             () => payment.owner()),
-    retryView("treasury()",          () => payment.treasury()),
-    retryView("allowedTokens(USDC)", () => payment.allowedTokens(usdcAddr)),
-    retryView("paused()",            () => payment.paused()),
-  ]);
+  const owner = await retryView("owner()", () => payment.owner());
+  const treasury = await retryView("treasury()", () => payment.treasury());
+  const paused = await retryView("paused()", () => payment.paused());
+
+  // Read-after-write: when WE set the allowlist inline (deployer ==
+  // owner) the tx is mined, but a stale RPC replica may still return
+  // allowedTokens=false. Poll until it catches up; fail-closed if it
+  // never does. On the Safe-owner path we did NOT set it here, so a
+  // false reading is expected and is not polled-to-true.
+  let allowed: boolean;
+  if (deployerIsOwner) {
+    allowed = await readUntil(
+      "allowedTokens(USDC)",
+      () => payment.allowedTokens(usdcAddr),
+      (v) => v === true,
+      10,
+      2000,
+    );
+  } else {
+    allowed = await retryView("allowedTokens(USDC)", () => payment.allowedTokens(usdcAddr));
+  }
+
   const ownerOk = owner.toLowerCase() === ownerAddr.toLowerCase();
   const treasuryOk = treasury.toLowerCase() === treasuryAddr.toLowerCase();
-  // allowed may legitimately be false on the Safe-owner path (the Safe
-  // must run setAllowedToken itself); only require it when deployer==owner.
-  const allowedOk = ownerOk && signerAddr.toLowerCase() === ownerAddr.toLowerCase() ? allowed === true : true;
+  // When deployer == owner we set the allowlist inline → it MUST be true
+  // after the read-after-write settle. On the Safe path the Safe sets it
+  // later, so a false reading there is not a failure.
+  const allowedOk = deployerIsOwner ? allowed === true : true;
   const ok = ownerOk && treasuryOk && paused === false && allowedOk;
 
   console.log(`  owner():               ${owner}  ${ownerOk ? "✓" : "✗"}`);
   console.log(`  treasury():            ${treasury}  ${treasuryOk ? "✓" : "✗"}`);
-  console.log(`  allowedTokens(USDC):   ${allowed}  ${allowed ? "✓" : "(set by owner Safe)"}`);
+  console.log(
+    `  allowedTokens(USDC):   ${allowed}  ${allowed ? "✓" : deployerIsOwner ? "✗" : "(set by owner Safe)"}`,
+  );
   console.log(`  paused():              ${paused}  ${paused === false ? "✓" : "✗"}`);
 
   if (!ok) {
     throw new Error("Post-deploy verification failed — see ✗ marks above.");
   }
 
+  // Only reached after ALL mandatory checks passed → safe to persist the
+  // deployment evidence record.
   const deploymentsDir = path.join(__dirname, "..", "deployments", "devtest", network.name);
   if (!fs.existsSync(deploymentsDir)) {
     fs.mkdirSync(deploymentsDir, { recursive: true });
@@ -274,6 +343,9 @@ async function main(): Promise<void> {
     allowedToken: usdcAddr,
     allowedTokenActive: allowed,
     deployTxHash: deployTx?.hash ?? null,
+    deployBlockNumber: deployBlock,
+    setAllowedTokenTxHash: allowlistTxHash,
+    setAllowedTokenBlockNumber: allowlistBlock,
     deployedAt: new Date().toISOString(),
     abi: art.abi,
     bytecodeLength: (art.bytecode.length - 2) / 2,

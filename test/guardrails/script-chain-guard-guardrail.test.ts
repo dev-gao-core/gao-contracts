@@ -85,6 +85,10 @@ const BROADCAST_SCRIPTS: ReadonlyArray<{
     path: "scripts/smokeGaoDomainDepositV3.devtest.ts",
     confirmEnv: "CONFIRM_SMOKE_V3",
   },
+  {
+    path: "scripts/deployGaoDomainPaymentV1.devtest.ts",
+    confirmEnv: "CONFIRM_DEPLOY_PAYMENT_V1",
+  },
 ];
 
 describe("CC-4 — broadcast scripts carry chain allowlist + ban + CONFIRM", () => {
